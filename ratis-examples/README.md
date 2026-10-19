@@ -139,6 +139,55 @@ for server: `java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.co
 replace {serverIndex} with 0, 1, or 2
 for client: `java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.counter.client.CounterClient`
 
+## Example 4: RocksDB Key-Value Store
+
+A key-value store whose state lives in RocksDB (`org.rocksdb:rocksdbjni`), written
+the way Apache Ozone's `OzoneManagerStateMachine` + `OzoneManagerDoubleBuffer` do it,
+with every Ozone dependency removed. The point of the example is to show where Ratis'
+three indexes come from:
+
+* `commitIndex`: Ratis replicated the entry to a majority. The state machine is not involved.
+* `appliedIndex`: Ratis called `RocksDbStateMachine.applyTransaction`. That method only
+  queues the command into `RocksDbDoubleBuffer` and returns, so this index moves at once.
+* `applyCompletedIndex` (the `applied` block in `ratis sh group info`): the double buffer's
+  flush thread committed a batch to RocksDB as one `WriteBatch`, together with the last
+  term-index (`TransactionInfo`), and then called `updateLastAppliedTermIndex`. On restart the
+  state machine reads that marker back and Ratis replays the log from there.
+
+Classes, in reading order: `KeyValueCommand` (wire format), `TransactionInfo` (the marker
+stored in the DB), `RocksDbDoubleBuffer`, `RocksDbStateMachine`, `RocksDbServer`, `RocksDbClient`.
+
+Not ported from Ozone: leader-to-follower snapshot install (keep log purging off, the default,
+so a lagging follower catches up by log replay) and the table cache for reading unflushed data
+(a `get` sees a value once its batch is flushed).
+
+### Run RocksDB Server and Client
+
+Server (one per peer index; the JVM flags are optional):
+
+```
+java -Dkv.flush.interval.ms=1500 -Dkv.max.unflushed=10000 -Dkv.sync.writes=false -Dkv.write.buffer.size=0 \
+     -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbServer {serverIndex}
+```
+
+* `kv.flush.interval.ms`: delay before each batch commit; `0` (default) flushes as soon as anything is
+  queued, like Ozone. A positive value widens the gap between `appliedIndex` and `applyCompletedIndex`.
+* `kv.max.unflushed`: how many applied-but-unflushed entries `applyTransaction` may run ahead (Ozone's
+  `ozone.om.unflushed.transaction.max.count`, default 10000).
+* `kv.sync.writes`: fsync each RocksDB batch.
+* `kv.write.buffer.size`: RocksDB memtable size in bytes; small values force frequent memtable flushes.
+
+Client:
+
+```
+java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient put KEY VALUE
+java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient get KEY [peerIndex]
+java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient delete KEY
+java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient load COUNT [inFlight]
+```
+
+Watch the indexes while `load` runs with `ratis sh group info -peers host:port`.
+
 ## Pre-Setup Vagrant Pseudo Cluster
 Note: This option is only available to Example 1 and 2
 One can see the interactions of a three server Ratis cluster with a load-generator running against it

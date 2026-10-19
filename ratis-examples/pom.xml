@@ -25,6 +25,7 @@
 
   <properties>
     <jcommander.version>1.82</jcommander.version>
+    <rocksdbjni.version>11.8.1</rocksdbjni.version>
   </properties>
 
   <dependencies>
@@ -134,6 +135,11 @@
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>
       <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.rocksdb</groupId>
+      <artifactId>rocksdbjni</artifactId>
+      <version>${rocksdbjni.version}</version>
     </dependency>
   </dependencies>
   <build>
