@@ -188,6 +188,9 @@ java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDb
 
 Watch the indexes while `load` runs with `ratis sh group info -peers host:port`.
 
+Planned column family layout for a storage-as-a-service version (image metadata, chunks, cleanup,
+the Raft marker in its own family): [COLUMN_FAMILIES.md](src/main/java/org/apache/ratis/examples/rocksdb/COLUMN_FAMILIES.md).
+
 ## Pre-Setup Vagrant Pseudo Cluster
 Note: This option is only available to Example 1 and 2
 One can see the interactions of a three server Ratis cluster with a load-generator running against it
