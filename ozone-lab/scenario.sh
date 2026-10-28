@@ -371,6 +371,7 @@ fire() {
 }
 
 scheduler_loop() {
+  set +u  # the loop runs unattended for days: an unset variable must not end it
   [ -f "$SCHEDULE" ] || die "no schedule file $SCHEDULE"
   [ "$LAB_PROFILE" = accel ] && date +%s > state/t0
   : > state/fired.txt
@@ -393,7 +394,9 @@ scheduler_loop() {
         continue
       fi
       log "scheduler: fire $t $action"
-      fire "$action"
+      # own subshell + stdin from /dev/null: an action that fails cannot stop the scheduler,
+      # and docker compose exec cannot read the schedule file as its stdin
+      ( fire "$action" ) < /dev/null || log "scheduler: $t $action failed (exit $?)"
     done < "$SCHEDULE"
     first=0
     writer_tick
