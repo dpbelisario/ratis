@@ -84,7 +84,8 @@ public final class RocksDbServer implements Closeable {
         .setMaxUnflushed(Integer.getInteger("kv.max.unflushed", 10000))
         .setFlushIntervalMs(Long.getLong("kv.flush.interval.ms", 0L))
         .setSyncWrites(Boolean.getBoolean("kv.sync.writes"))
-        .setWriteBufferSize(Long.getLong("kv.write.buffer.size", 0L));
+        .setWriteBufferSize(Long.getLong("kv.write.buffer.size", 0L))
+        .setRocksDbStats(Boolean.parseBoolean(System.getProperty("kv.rocksdb.stats", "true")));
   }
 
   public static void main(String[] args) {
@@ -107,7 +108,8 @@ public final class RocksDbServer implements Closeable {
       e.printStackTrace();
       System.err.println("args = " + Arrays.toString(args));
       System.err.println("Usage: java [-Dkv.max.unflushed=N] [-Dkv.flush.interval.ms=MS] [-Dkv.sync.writes=true]"
-          + " [-Dkv.write.buffer.size=BYTES] org.apache.ratis.examples.rocksdb.RocksDbServer peer_index");
+          + " [-Dkv.write.buffer.size=BYTES] [-Dkv.rocksdb.stats=false]"
+          + " org.apache.ratis.examples.rocksdb.RocksDbServer peer_index");
       System.exit(1);
     }
   }

@@ -176,6 +176,7 @@ java -Dkv.flush.interval.ms=1500 -Dkv.max.unflushed=10000 -Dkv.sync.writes=false
   `ozone.om.unflushed.transaction.max.count`, default 10000).
 * `kv.sync.writes`: fsync each RocksDB batch.
 * `kv.write.buffer.size`: RocksDB memtable size in bytes; small values force frequent memtable flushes.
+* `kv.rocksdb.stats`: RocksDB statistics on the node (default `true`). Read them with the client's `stats` command.
 
 Client:
 
@@ -184,9 +185,13 @@ java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDb
 java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient get KEY [peerIndex]
 java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient delete KEY
 java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient load COUNT [inFlight]
+java -cp ./ratis-examples/target/*.jar org.apache.ratis.examples.rocksdb.RocksDbClient stats [peerIndex]
 ```
 
 Watch the indexes while `load` runs with `ratis sh group info -peers host:port`.
+
+`stats` returns that node's RocksDB read statistics since the previous `stats` call (reads served,
+memtable and block cache hits, which level answered, get latency percentiles) and resets them.
 
 Planned column family layout for a storage-as-a-service version (image metadata, chunks, cleanup,
 the Raft marker in its own family): [COLUMN_FAMILIES.md](src/main/java/org/apache/ratis/examples/rocksdb/COLUMN_FAMILIES.md).

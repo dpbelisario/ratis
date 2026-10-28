@@ -36,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
  *   RocksDbClient put KEY VALUE
  *   RocksDbClient get KEY [PEER_INDEX]
  *   RocksDbClient delete KEY
+ *   RocksDbClient stats [PEER_INDEX]   # that node's RocksDB read statistics since the previous stats call
  *   RocksDbClient load COUNT [BATCH]   # COUNT async puts, BATCH in flight at a time (default 100)
  * </pre>
  */
@@ -79,7 +80,7 @@ public final class RocksDbClient {
   }
 
   public static void main(String[] args) throws Exception {
-    if (args.length < 2) {
+    if (args.length < 1 || (args.length < 2 && !"stats".equalsIgnoreCase(args[0]))) {
       usage();
     }
     try (RaftClient client = newClient()) {
@@ -97,6 +98,13 @@ public final class RocksDbClient {
                   Constants.PEERS.get(Integer.parseInt(args[2])).getId())
               : client.io().sendReadOnly(KeyValueCommand.get(args[1]).toMessage())));
           break;
+        case "stats":
+          // Optional second argument: index of the node to ask. Resets that node's counters.
+          System.out.println(text(args.length > 1
+              ? client.io().sendReadOnly(KeyValueCommand.stats().toMessage(),
+                  Constants.PEERS.get(Integer.parseInt(args[1])).getId())
+              : client.io().sendReadOnly(KeyValueCommand.stats().toMessage())));
+          break;
         case "delete":
           System.out.println(text(client.io().send(KeyValueCommand.delete(args[1]).toMessage())));
           break;
@@ -113,7 +121,8 @@ public final class RocksDbClient {
   }
 
   private static void usage() {
-    System.err.println("Usage: RocksDbClient put KEY VALUE | get KEY [PEER_INDEX] | delete KEY | load COUNT [BATCH]");
+    System.err.println("Usage: RocksDbClient put KEY VALUE | get KEY [PEER_INDEX] | delete KEY"
+        + " | stats [PEER_INDEX] | load COUNT [BATCH]");
     System.exit(1);
   }
 }

@@ -33,15 +33,20 @@ import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.ratis.util.LifeCycle;
 import org.apache.ratis.util.Preconditions;
 import org.rocksdb.FlushOptions;
+import org.rocksdb.HistogramData;
+import org.rocksdb.HistogramType;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.Statistics;
+import org.rocksdb.TickerType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,7 +67,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Tunables (system properties, read by {@link RocksDbServer}):
  * {@code kv.max.unflushed} (default 10000, Ozone's default), {@code kv.flush.interval.ms} (default 0),
- * {@code kv.sync.writes} (default false), {@code kv.write.buffer.size} (RocksDB memtable bytes).
+ * {@code kv.sync.writes} (default false), {@code kv.write.buffer.size} (RocksDB memtable bytes),
+ * {@code kv.rocksdb.stats} (default true: RocksDB statistics on, read with the STATS command).
  *
  * <p>Not ported: Ozone's leader-to-follower snapshot install (checkpoint tarball over HTTP) and its
  * table cache for reads of unflushed data. Keep log purging off (the default) so lagging followers
@@ -77,6 +83,7 @@ public class RocksDbStateMachine extends BaseStateMachine {
     private long flushIntervalMs = 0;
     private boolean syncWrites = false;
     private long writeBufferSize = 0;
+    private boolean rocksDbStats = true;
 
     public Config setMaxUnflushed(int n) {
       this.maxUnflushed = n;
@@ -98,15 +105,23 @@ public class RocksDbStateMachine extends BaseStateMachine {
       return this;
     }
 
+    /** RocksDB statistics cost a few percent of throughput; they power the STATS command. */
+    public Config setRocksDbStats(boolean enabled) {
+      this.rocksDbStats = enabled;
+      return this;
+    }
+
     @Override
     public String toString() {
       return "maxUnflushed=" + maxUnflushed + ", flushIntervalMs=" + flushIntervalMs
-          + ", syncWrites=" + syncWrites + ", writeBufferSize=" + writeBufferSize;
+          + ", syncWrites=" + syncWrites + ", writeBufferSize=" + writeBufferSize + ", rocksDbStats=" + rocksDbStats;
     }
   }
 
   private final Config config;
   private Options options;
+  /** Null when kv.rocksdb.stats=false. */
+  private Statistics stats;
   private RocksDB db;
   private volatile RocksDbDoubleBuffer doubleBuffer;
   private volatile TransactionInfo latestSnapshot;
@@ -154,6 +169,10 @@ public class RocksDbStateMachine extends BaseStateMachine {
     if (config.writeBufferSize > 0) {
       // Small memtable => frequent RocksDB flushes to SST, the "F2" scenario.
       options.setWriteBufferSize(config.writeBufferSize);
+    }
+    if (config.rocksDbStats) {
+      stats = new Statistics();
+      options.setStatistics(stats);
     }
     try {
       db = RocksDB.open(options, dir.getAbsolutePath());
@@ -230,6 +249,9 @@ public class RocksDbStateMachine extends BaseStateMachine {
       }
       if (options != null) {
         options.close();
+      }
+      if (stats != null) {
+        stats.close();
       }
       LOG.info("{}: closed", getId());
     });
@@ -342,12 +364,41 @@ public class RocksDbStateMachine extends BaseStateMachine {
       if (!cmd.isReadOnly()) {
         throw new IOException("Not a read-only command: " + cmd);
       }
+      if (cmd.getType() == KeyValueCommand.Type.STATS) {
+        return CompletableFuture.completedFuture(Message.valueOf(readStats()));
+      }
       final byte[] value = db.get(cmd.getKeyBytes());
       return CompletableFuture.completedFuture(Message.valueOf(
           value == null ? "" : new String(value, StandardCharsets.UTF_8)));
     } catch (IllegalArgumentException | IOException | RocksDBException e) {
       return completeExceptionally(e);
     }
+  }
+
+  /**
+   * RocksDB read statistics of this node since the previous STATS call, as one line of
+   * {@code name=value;} pairs. Resets the counters, so each call covers one interval.
+   * Every {@link #query} GET is one RocksDB get, so {@code gets} is the number of reads served.
+   */
+  private synchronized String readStats() throws RocksDBException {
+    if (stats == null) {
+      return "stats=off";
+    }
+    final HistogramData get = stats.getHistogramData(HistogramType.DB_GET);
+    final String line = "gets=" + stats.getTickerCount(TickerType.NUMBER_KEYS_READ)
+        + ";memtableHit=" + stats.getTickerCount(TickerType.MEMTABLE_HIT)
+        + ";memtableMiss=" + stats.getTickerCount(TickerType.MEMTABLE_MISS)
+        + ";hitL0=" + stats.getTickerCount(TickerType.GET_HIT_L0)
+        + ";hitL1=" + stats.getTickerCount(TickerType.GET_HIT_L1)
+        + ";hitL2plus=" + stats.getTickerCount(TickerType.GET_HIT_L2_AND_UP)
+        + ";blockCacheHit=" + stats.getTickerCount(TickerType.BLOCK_CACHE_HIT)
+        + ";blockCacheMiss=" + stats.getTickerCount(TickerType.BLOCK_CACHE_MISS)
+        + ";getP50us=" + String.format(Locale.ROOT, "%.2f", get.getMedian())
+        + ";getP95us=" + String.format(Locale.ROOT, "%.2f", get.getPercentile95())
+        + ";getP99us=" + String.format(Locale.ROOT, "%.2f", get.getPercentile99())
+        + ";getMaxUs=" + String.format(Locale.ROOT, "%.2f", get.getMax());
+    stats.reset();
+    return line;
   }
 
   // ---------------------------------------------------------------- snapshot

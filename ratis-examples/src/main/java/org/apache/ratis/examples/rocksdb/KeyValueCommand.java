@@ -27,9 +27,13 @@ import java.nio.charset.StandardCharsets;
  * Kept as plain bytes so the example has no protobuf schema of its own.
  */
 public final class KeyValueCommand {
-  /** Command types. GET is read-only and goes through query(), the others are log entries. */
+  /**
+   * Command types. PUT and DELETE are log entries. GET and STATS are read-only and go through
+   * query(): GET reads one key, STATS returns the node's RocksDB read statistics.
+   * New types are appended so existing type bytes keep their meaning.
+   */
   public enum Type {
-    PUT, DELETE, GET;
+    PUT, DELETE, GET, STATS;
 
     static Type valueOf(byte b) {
       final Type[] values = values();
@@ -58,6 +62,11 @@ public final class KeyValueCommand {
     return new KeyValueCommand(Type.DELETE, key, "");
   }
 
+  /** Read-only request for the node's RocksDB statistics. The key is unused but must not be empty. */
+  public static KeyValueCommand stats() {
+    return new KeyValueCommand(Type.STATS, "_", "");
+  }
+
   public static KeyValueCommand get(String key) {
     return new KeyValueCommand(Type.GET, key, "");
   }
@@ -83,7 +92,7 @@ public final class KeyValueCommand {
   }
 
   public boolean isReadOnly() {
-    return type == Type.GET;
+    return type == Type.GET || type == Type.STATS;
   }
 
   public Message toMessage() {
