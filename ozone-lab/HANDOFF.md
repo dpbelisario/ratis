@@ -313,6 +313,7 @@ Change `job=` labels to the names that production uses. Look at the leaders.
 | Delete backlog (OM side) | `rocksdb_om_db_deletedtable_estimate_num_keys` | Big after 01:00, drains at 20,000 per minute. When does it reach 0? |
 | Delete backlog (SCM side) | `rocksdb_scm_db_deletedblocks_estimate_num_keys` | Grows when OM hands blocks to SCM faster than datanodes delete them. |
 | KeyDeletingService rate | `rate(deleting_service_metrics_num_keys_sent_for_purge[5m])` | When did it change near 06:00? |
+| FSO delete backlog (if the buckets are FSO) | `rate(deleting_service_metrics_num_sub_files_moved_to_deleted_table[5m])`, `rocksdb_om_db_deleteddirectorytable_estimate_num_keys` | An FSO `rm -r` of a directory is **1** in `om_metrics_num_key_deletes`. Its files move to deletedTable later, in DirectoryDeletingService runs (every 60s, 10 threads). A delete at 01:00 can still be working at 06:00. |
 | SCM JVM at 06:00 | `rate(jvm_metrics_gc_time_millis{processname="StorageContainerManager"}[5m])`, `jvm_metrics_mem_heap_used_m`, `jvm_metrics_threads_blocked` | GC near 1000 ms/s or many blocked threads = SCM cannot run its handlers. |
 
 Production logs to check (no copy into the lab): the OM log near 06:00 for the first
@@ -349,6 +350,14 @@ log. The lab shows: retries and "not leader" lines do not need a real leader cha
 recovers. A failover that does not recover needs a cause that stays: for example all SCMs
 slow (`cpu-all`) or SCM handlers that never finish (`scm-stuck`).
 
+**FSO delete (tested on 2.0.0).** `ozone fs -rm -r -skipTrash ofs://omservice/vol1/fso/<dir>`
+removed a 300-key directory in one RPC (1.5 s). `om_metrics_num_key_deletes` went up by 1.
+Within 60 s, DirectoryDeletingService moved the 300 files to deletedTable
+(`deleting_service_metrics_num_sub_files_moved_to_deleted_table` = 300, `num_dirs_purged` = 1).
+Then KeyDeletingService sent them to SCM as for OBS keys. Settings:
+`ozone.directory.deleting.service.interval` = 60s, `ozone.thread.number.dir.deletion` = 10;
+2.0.0 has no per-run file limit for this service.
+
 **Faults in the lab** (`FAULT_MODE`):
 
 | Mode | How | Models |
@@ -369,9 +378,9 @@ nothing until `fault-on` writes a flag file in `/tmp/lab-fault/` inside the SCM 
 - [ ] Production numbers: keys/s (normal and at 10:00), total key count, size of the
       01:00 delete (keys), OM and SCM handler counts, `ipc.server.handler.queue.size`.
 - [ ] Scale factor (default 1:200). Set it in `docker-config` and `profiles/*.env`.
-- [ ] Bucket layout (OBJECT_STORE or FSO). For FSO, the delete is a directory delete
-      (`ozone fs -rm -r -skipTrash ofs://omservice/vol1/fso/<dir>`), which goes through
-      DirectoryDeletingService first.
+- [ ] Bucket layout (OBJECT_STORE or FSO). Set `BUCKET=fso` in `lab.env` to model FSO:
+      seed and writer then write into `/vol1/fso`, and job01 deletes each batch as a
+      directory (`ozone fs -rm -r -skipTrash ofs://omservice/vol1/fso/<prefix>`). Tested.
 - [ ] Delete command the 01:00 job uses (S3 DeleteObjects, `ozone sh key delete`, `fs -rm -r`).
 - [ ] Network-delay fault (`delay`) in WSL: check `sudo modprobe sch_netem`.
 - [ ] Time-compression factor for `accel` (`SEC_PER_LAB_HOUR`, default 60).
@@ -389,7 +398,7 @@ nothing until `fault-on` writes a flag file in `/tmp/lab-fault/` inside the SCM 
 | `scenario.sh` | All commands (section 6) |
 | `byteman/` | SCM fault rules |
 | `prometheus.yml` | Scrapes `/prom` every 5 s: om1-3:9874, scm1-3:9876, datanode:9882, labmeta |
-| `perses/make-dashboard.py` | Generates the "Ozone RPC" dashboard (34 panels in 6 rows + a read-me panel) |
+| `perses/make-dashboard.py` | Generates the "Ozone RPC" dashboard (35 panels in 6 rows + a read-me panel) |
 | `docs/accel-run1.png` | Dashboard screenshot of the accel day in section 2.1 |
 | `docker-compose.replay.yaml`, `replay/` | Replay stack for exports |
 | `make-bundle.sh` | Builds `dist/setup.sh` |

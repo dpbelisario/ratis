@@ -742,6 +742,62 @@
         "kind": "Panel",
         "spec": {
           "display": {
+            "name": "FSO: DirectoryDeletingService (files moved to deletedTable /s, dirs purged /s)",
+            "description": "An FSO directory delete is 1 key delete in om_metrics_num_key_deletes. The files move to deletedTable here, every ozone.directory.deleting.service.interval (60s)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(deleting_service_metrics_num_sub_files_moved_to_deleted_table[1m])",
+                    "seriesNameFormat": "files {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(deleting_service_metrics_num_dirs_purged[1m])",
+                    "seriesNameFormat": "dirs {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rocksdb_om_db_deleteddirectorytable_estimate_num_keys",
+                    "seriesNameFormat": "deletedDirectoryTable {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p22": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
             "name": "SCM deletedBlocks table (deleted block log, estimate)",
             "description": "Transactions written by DeleteScmKeyBlocks through SCM Ratis. Drains when datanodes confirm deletes."
           },
@@ -770,7 +826,7 @@
           ]
         }
       },
-      "p22": {
+      "p23": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -826,7 +882,7 @@
           ]
         }
       },
-      "p23": {
+      "p24": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -858,7 +914,7 @@
           ]
         }
       },
-      "p24": {
+      "p25": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -890,7 +946,7 @@
           ]
         }
       },
-      "p25": {
+      "p26": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -922,7 +978,7 @@
           ]
         }
       },
-      "p26": {
+      "p27": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -954,7 +1010,7 @@
           ]
         }
       },
-      "p27": {
+      "p28": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -986,7 +1042,7 @@
           ]
         }
       },
-      "p28": {
+      "p29": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1018,7 +1074,7 @@
           ]
         }
       },
-      "p29": {
+      "p30": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1050,7 +1106,7 @@
           ]
         }
       },
-      "p30": {
+      "p31": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1094,7 +1150,7 @@
           ]
         }
       },
-      "p31": {
+      "p32": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1138,7 +1194,7 @@
           ]
         }
       },
-      "p32": {
+      "p33": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1170,7 +1226,7 @@
           ]
         }
       },
-      "p33": {
+      "p34": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1202,7 +1258,7 @@
           ]
         }
       },
-      "p34": {
+      "p35": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1504,6 +1560,15 @@
               "content": {
                 "$ref": "#/spec/panels/p22"
               }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p23"
+              }
             }
           ]
         }
@@ -1524,20 +1589,11 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p23"
-              }
-            },
-            {
-              "x": 8,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
                 "$ref": "#/spec/panels/p24"
               }
             },
             {
-              "x": 16,
+              "x": 8,
               "y": 0,
               "width": 8,
               "height": 8,
@@ -1546,8 +1602,8 @@
               }
             },
             {
-              "x": 0,
-              "y": 8,
+              "x": 16,
+              "y": 0,
               "width": 8,
               "height": 8,
               "content": {
@@ -1555,7 +1611,7 @@
               }
             },
             {
-              "x": 8,
+              "x": 0,
               "y": 8,
               "width": 8,
               "height": 8,
@@ -1564,12 +1620,21 @@
               }
             },
             {
-              "x": 16,
+              "x": 8,
               "y": 8,
               "width": 8,
               "height": 8,
               "content": {
                 "$ref": "#/spec/panels/p28"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p29"
               }
             }
           ]
@@ -1591,20 +1656,11 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p29"
-              }
-            },
-            {
-              "x": 8,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
                 "$ref": "#/spec/panels/p30"
               }
             },
             {
-              "x": 16,
+              "x": 8,
               "y": 0,
               "width": 8,
               "height": 8,
@@ -1613,8 +1669,8 @@
               }
             },
             {
-              "x": 0,
-              "y": 8,
+              "x": 16,
+              "y": 0,
               "width": 8,
               "height": 8,
               "content": {
@@ -1622,7 +1678,7 @@
               }
             },
             {
-              "x": 8,
+              "x": 0,
               "y": 8,
               "width": 8,
               "height": 8,
@@ -1631,12 +1687,21 @@
               }
             },
             {
-              "x": 16,
+              "x": 8,
               "y": 8,
               "width": 8,
               "height": 8,
               "content": {
                 "$ref": "#/spec/panels/p34"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p35"
               }
             }
           ]

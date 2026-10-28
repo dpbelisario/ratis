@@ -95,7 +95,7 @@ n_clients() {
 }
 
 # The pool lists written key batches ("prefix count") that the 01:00 job may delete.
-pool_add() { ( flock 9; echo "$1 $2" >> state/pool.txt ) 9> state/pool.lock; }
+pool_add() { ( flock 9; echo "$1 $2 ${3:-$BUCKET}" >> state/pool.txt ) 9> state/pool.lock; }
 pool_take() { ( flock 9; [ -f state/pool.txt ] && cat state/pool.txt; : > state/pool.txt ) 9> state/pool.lock; }
 pool_take_upto() {  # oldest whole batches until the next one would pass the limit (at least one batch)
   ( flock 9
@@ -198,14 +198,22 @@ run_job() {  # run_job <name> <function>: background, pid file, log file
 }
 
 job01_body() {  # the "01:00" bulk delete: delete the oldest written batches, up to JOB01_KEYS keys
-  local batches total=0 p n
+  # obs bucket: one DeleteKey RPC per key (freon ockr, JOB01_THREADS threads)
+  # fso bucket: one directory delete per batch (ozone fs -rm -r -skipTrash); the OM
+  #             DirectoryDeletingService then moves the files to deletedTable in the background
+  local batches total=0 p n b
   batches=$(pool_take_upto "$JOB01_KEYS")
   total=$(echo "$batches" | awk '{s += $2} END {print s + 0}')
   log "job01: bulk delete of $total keys ($(echo "$batches" | grep -c .) batches), $JOB01_THREADS threads"
   local t0=$SECONDS
-  while read -r p n; do
+  while read -r p n b; do
     [ -n "$p" ] || continue
-    freon ockr -v "$VOLUME" -b "$BUCKET" -p "$p" -n "$n" -t "$JOB01_THREADS" -f
+    b=${b:-$BUCKET}
+    if [ "$b" = fso ]; then
+      dc exec -T client ozone fs -rm -r -skipTrash "ofs://omservice/$VOLUME/$b/$p"
+    else
+      freon ockr -v "$VOLUME" -b "$b" -p "$p" -n "$n" -t "$JOB01_THREADS" -f
+    fi
   done <<< "$batches"
   log "job01: done in $((SECONDS - t0)) s"
 }
@@ -445,6 +453,7 @@ print(f"  OM key deletes/s (max host)     {one('max(rate(om_metrics_num_key_dele
 print(f"  OM key commits/s (max host)     {one('max(rate(om_metrics_num_key_commits[1m]))'):10.1f}")
 print(f"  OM deletedTable keys (max)      {one('max(rocksdb_om_db_deletedtable_estimate_num_keys)'):10.0f}")
 print(f"  KeyDeletingService sent/s       {one('max(rate(deleting_service_metrics_num_keys_sent_for_purge[1m]))'):10.1f}")
+print(f"  FSO: files moved by DirDeleting/s {one('max(rate(deleting_service_metrics_num_sub_files_moved_to_deleted_table[1m]))'):8.1f}  deletedDirectoryTable {one('max(rocksdb_om_db_deleteddirectorytable_estimate_num_keys)'):6.0f}")
 print(f"  SCM DeleteScmKeyBlocks          {rate_type('DeleteScmKeyBlocks')}")
 print(f"  SCM AllocateScmBlock            {rate_type('AllocateScmBlock')}")
 print(f"  SCM deletedBlocks table (max)   {one('max(rocksdb_scm_db_deletedblocks_estimate_num_keys)'):10.0f}")

@@ -91,6 +91,12 @@ ROWS = [
           ("rate(deleting_service_metrics_num_keys_purged[1m])", "purged {{hostname}}")]),
         ("KeyDeletingService run latency (ms)", "",
          [("om_performance_metrics_key_deleting_service_latency_ms", "{{hostname}}")]),
+        ("FSO: DirectoryDeletingService (files moved to deletedTable /s, dirs purged /s)",
+         "An FSO directory delete is 1 key delete in om_metrics_num_key_deletes. The files move to deletedTable here, "
+         "every ozone.directory.deleting.service.interval (60s).",
+         [("rate(deleting_service_metrics_num_sub_files_moved_to_deleted_table[1m])", "files {{hostname}}"),
+          ("rate(deleting_service_metrics_num_dirs_purged[1m])", "dirs {{hostname}}"),
+          ("rocksdb_om_db_deleteddirectorytable_estimate_num_keys", "deletedDirectoryTable {{hostname}}")]),
         ("SCM deletedBlocks table (deleted block log, estimate)",
          "Transactions written by DeleteScmKeyBlocks through SCM Ratis. Drains when datanodes confirm deletes.",
          [("rocksdb_scm_db_deletedblocks_estimate_num_keys", "{{hostname}}")]),
