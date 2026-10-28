@@ -370,6 +370,10 @@ Then KeyDeletingService sent them to SCM as for OBS keys. Settings:
 | `pause` | `docker pause` the SCM leader | SCM process frozen |
 | `delay` | `tc netem delay 500ms` on the SCM leader | Slow network. Not tested: the cloud kernel has no `sch_netem`. Test it in WSL. |
 
+The scheduler also counts OM log lines with SCM retry / failover / not-leader messages
+(`FAILOVER_RE` in `scenario.sh`) into the metric `lab_om_failover_log_lines_total`; the
+dashboard shows it per minute in row 1. Production has no such metric: grep the OM log.
+
 The Byteman rules are in `byteman/scm-fault.btm`. They are loaded at SCM start and do
 nothing until `fault-on` writes a flag file in `/tmp/lab-fault/` inside the SCM containers.
 
@@ -398,7 +402,7 @@ nothing until `fault-on` writes a flag file in `/tmp/lab-fault/` inside the SCM 
 | `scenario.sh` | All commands (section 6) |
 | `byteman/` | SCM fault rules |
 | `prometheus.yml` | Scrapes `/prom` every 5 s: om1-3:9874, scm1-3:9876, datanode:9882, labmeta |
-| `perses/make-dashboard.py` | Generates the "Ozone RPC" dashboard (35 panels in 6 rows + a read-me panel) |
+| `perses/make-dashboard.py` | Generates the "Ozone RPC" dashboard (36 panels in 6 rows + a read-me panel) |
 | `docs/accel-run1.png` | Dashboard screenshot of the accel day in section 2.1 |
 | `docker-compose.replay.yaml`, `replay/` | Replay stack for exports |
 | `make-bundle.sh` | Builds `dist/setup.sh` |

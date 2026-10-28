@@ -52,6 +52,8 @@ cd "$LAB_DIR" || exit 1
 : "${RESTART_TARGET:=om-leader}"       # what the 11:00 "restart" restarts
 : "${CLIENT_HEAP:=384m}"               # heap of each freon client JVM
 : "${PROM_URL:=http://localhost:9090}"
+# OM log lines that show OM -> SCM retries / failover (startup lines excluded)
+FAILOVER_RE='failover attempts|Trying to failover|Failing over|NotLeaderException|LeaderNotReadyException|not the leader' 
 export LAB_PROFILE
 
 mkdir -p state/jobs state/clients state/metrics logs exports
@@ -131,6 +133,9 @@ write_metrics() {
     echo "lab_writer_on $([ -f state/writer.on ] && echo 1 || echo 0)"
     echo "# TYPE lab_writer_clients gauge"
     echo "lab_writer_clients $(n_clients)"
+    echo "# HELP lab_om_failover_log_lines_total OM log lines with SCM retry / failover / not-leader messages."
+    echo "# TYPE lab_om_failover_log_lines_total counter"
+    echo "lab_om_failover_log_lines_total $(cat state/failover.total 2>/dev/null || echo 0)"
     echo "# TYPE lab_pool_keys gauge"
     echo "lab_pool_keys $(pool_keys)"
   } > "$f" && chmod 644 "$f" && mv -f "$f" state/metrics/metrics
@@ -253,6 +258,16 @@ writer_tick() {  # called by the scheduler loop
   [ $((now - last)) -ge "$WRITER_INTERVAL" ] || return 0
   echo "$now" > state/writer.last
   if [ "$(n_clients)" -lt "$WRITER_MAX_CLIENTS" ]; then writer_client; fi
+}
+failover_tick() {  # every 30 s: count new OM failover log lines into state/failover.total
+  local last now n total
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  last=$(cat state/failover.last 2>/dev/null || echo "$now")
+  [ $(( $(date -d "$now" +%s) - $(date -d "$last" +%s) )) -ge 30 ] || { [ -f state/failover.last ] || echo "$now" > state/failover.last; return 0; }
+  n=$(dc logs --since "$last" --until "$now" om1 om2 om3 2>/dev/null | grep -v STARTUP_MSG | grep -ciE "$FAILOVER_RE" || true)
+  total=$(cat state/failover.total 2>/dev/null || echo 0)
+  echo $((total + ${n:-0})) > state/failover.total
+  echo "$now" > state/failover.last
 }
 cmd_writer_on() { touch state/writer.on; log "writer: on (1 client / ${WRITER_INTERVAL}s, $WRITER_KEYS keys x $WRITER_THREADS threads, max $WRITER_MAX_CLIENTS clients)"; write_metrics; }
 cmd_writer_off() { rm -f state/writer.on; log "writer: off"; write_metrics; }
@@ -382,6 +397,7 @@ scheduler_loop() {
     done < "$SCHEDULE"
     first=0
     writer_tick
+    failover_tick
     write_metrics
     if [ -n "$endm" ] && [ "${day#vday}" = 0 ] && [ "$nowm" -ge "$endm" ]; then
       log "scheduler: reached ACCEL_END $ACCEL_END, stopping"
@@ -467,7 +483,7 @@ print(f"  leader elections (SCM, OM sum)  {el_scm:6.0f} {el_om:6.0f}")
 print(f"  Ozone targets up                {up:10.0f} / 7")
 EOF
   local fo
-  fo=$(for s in om1 om2 om3; do dc logs --since 5m "$s" 2>/dev/null; done | grep -ciE 'failover|failing over|NotLeaderException|not the leader' || true)
+  fo=$(dc logs --since 5m om1 om2 om3 2>/dev/null | grep -v STARTUP_MSG | grep -ciE "$FAILOVER_RE" || true)
   echo "  OM log lines with failover/not-leader (last 5 min, all OMs): $fo"
 }
 

@@ -47,6 +47,10 @@ ROWS = [
         ("OM open connections",
          "Open TCP connections are not requests. Compare with the queue.",
          [(f"rpc_num_open_connections{{{OM_RPC}}}", "{{hostname}}")]),
+        ("OM log: SCM retry / failover / not-leader lines per minute",
+         "Counted from the OM logs by the lab scheduler (production: grep the OM log). Retries come after "
+         "hdds.scmclient.rpc.timeout (15m) or a 'not leader' answer.",
+         [("rate(lab_om_failover_log_lines_total[5m]) * 60", "OM log lines/min")]),
         ("OM client backoff and dropped connections /s",
          "Backoff happens when the call queue is full (backoff must be enabled).",
          [(f"rate(rpc_rpc_client_backoff{{{OM_RPC}}}[1m])", "backoff {{hostname}}"),
