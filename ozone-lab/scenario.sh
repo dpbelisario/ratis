@@ -558,13 +558,27 @@ EOF
   [ -f replay/events.log ] && { echo "Events in this run (replay/events.log):"; grep -E 'scheduler: fire|done|fault|restart' replay/events.log | tail -20; }
 }
 
-cmd_ensure() {  # cloud helper: safe to run any number of times
+cmd_ensure() {  # cloud helper: safe to run any number of times, also after the machine rebooted
+  local rebooted=0 fault_mode=""
   docker info >/dev/null 2>&1 || {
     echo "starting dockerd"
+    rebooted=1
     (setsid nohup dockerd > /var/log/dockerd.log 2>&1 &)
     for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
   }
+  [ -s state/fault ] && fault_mode=$(awk '{print $1}' state/fault)
+  if [ $rebooted = 1 ]; then
+    # after a reboot, containers that docker restarts by itself can come back without their
+    # network (no DNS): recreate them all; the data stays in the volumes
+    log "ensure: dockerd was down (machine restarted); recreating the containers"
+    dc up -d --force-recreate
+    : > state/fault   # the fault flags lived inside the old containers
+  fi
   if [ "$(prom_targets_up)" != 7 ]; then cmd_up; fi
+  if [ -n "$fault_mode" ] && [ ! -s state/fault ]; then
+    log "ensure: re-applying the fault that was on before ($fault_mode)"
+    cmd_fault_on "$fault_mode"
+  fi
   if [ ! -s state/pool.txt ] && ! running job01 && [ ! -f state/seeded ]; then cmd_seed && touch state/seeded; fi
   cmd_start
   cmd_status

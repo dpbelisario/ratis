@@ -107,6 +107,12 @@ The command prints the Perses link with the correct time range. Replay uses port
 The cloud machine cannot accept connections from your laptop, so there is no live link.
 The export is the full Prometheus data (every metric, 5 s resolution).
 
+Note on the cloud machine: it is paused when the Claude session is idle, and it comes
+back with its disk but with no processes. On 2026-10-28 it was paused from about 18:37 to
+20:18 JST, so the evening data has that gap. `./scenario.sh ensure` restarts Docker,
+recreates the containers (data stays in the volumes) and re-applies an active fault. The
+session now keeps a background task running through the night so the machine stays up.
+
 The first cloud day: the scheduler started at 18:25 JST on 2026-10-28 (writer on). It runs
 job01 at 01:00, fault-on at 06:00, job10 at 10:00 and fault-off + restart at 11:00 JST on
 2026-10-29. Two daily Routines (01:00 and 10:00 JST) check that the jobs ran and rerun them
