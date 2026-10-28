@@ -1,0 +1,134 @@
+# Ozone 2.0.0 incident lab: 3 SCM (HA) + 3 OM (HA) + 1 datanode + Prometheus + Perses.
+# Placeholder hostnames only (om1..3, scm1..3). This is a lab, not production.
+x-ozone: &ozone
+  image: ${OZONE_IMAGE:-apache/ozone:2.0.0}
+  env_file:
+    - docker-config
+    - profiles/${LAB_PROFILE:-realtime}.env
+  environment: &ozone-env
+    OZONE_HEAPSIZE_MAX: ${OZONE_HEAP:-1g}
+  restart: unless-stopped
+
+services:
+  scm1:
+    <<: *ozone
+    hostname: scm1
+    ports: ["19876:9876"]
+    environment:
+      <<: *ozone-env
+      ENSURE_SCM_INITIALIZED: /data/metadata/scm/current/VERSION
+      BYTEMAN_SCRIPT: /opt/lab/scm-fault.btm
+    volumes: ["scm1:/data", "./byteman:/opt/lab:ro"]
+    command: ["ozone", "scm"]
+  scm2:
+    <<: *ozone
+    hostname: scm2
+    ports: ["29876:9876"]
+    environment:
+      <<: *ozone-env
+      WAITFOR: scm1:9894
+      ENSURE_SCM_BOOTSTRAPPED: /data/metadata/scm/current/VERSION
+      BYTEMAN_SCRIPT: /opt/lab/scm-fault.btm
+    volumes: ["scm2:/data", "./byteman:/opt/lab:ro"]
+    command: ["ozone", "scm"]
+  scm3:
+    <<: *ozone
+    hostname: scm3
+    ports: ["39876:9876"]
+    environment:
+      <<: *ozone-env
+      WAITFOR: scm2:9894
+      ENSURE_SCM_BOOTSTRAPPED: /data/metadata/scm/current/VERSION
+      BYTEMAN_SCRIPT: /opt/lab/scm-fault.btm
+    volumes: ["scm3:/data", "./byteman:/opt/lab:ro"]
+    command: ["ozone", "scm"]
+  om1:
+    <<: *ozone
+    hostname: om1
+    ports: ["19874:9874"]
+    environment:
+      <<: *ozone-env
+      WAITFOR: scm3:9894
+      ENSURE_OM_INITIALIZED: /data/metadata/om/current/VERSION
+    volumes: ["om1:/data"]
+    command: ["ozone", "om"]
+  om2:
+    <<: *ozone
+    hostname: om2
+    ports: ["29874:9874"]
+    environment:
+      <<: *ozone-env
+      WAITFOR: scm3:9894
+      ENSURE_OM_INITIALIZED: /data/metadata/om/current/VERSION
+    volumes: ["om2:/data"]
+    command: ["ozone", "om"]
+  om3:
+    <<: *ozone
+    hostname: om3
+    ports: ["39874:9874"]
+    environment:
+      <<: *ozone-env
+      WAITFOR: scm3:9894
+      ENSURE_OM_INITIALIZED: /data/metadata/om/current/VERSION
+    volumes: ["om3:/data"]
+    command: ["ozone", "om"]
+  datanode:
+    <<: *ozone
+    hostname: datanode
+    ports: ["19882:9882"]
+    volumes: ["dn1:/data"]
+    command: ["ozone", "datanode"]
+  # Client container: freon load and admin commands run here, not inside an OM.
+  client:
+    <<: *ozone
+    hostname: client
+    environment:
+      OZONE_HEAPSIZE_MAX: 2g
+    command: ["sleep", "infinity"]
+  # Recon is optional (another JVM): docker compose --profile recon up -d
+  recon:
+    <<: *ozone
+    hostname: recon
+    profiles: ["recon"]
+    ports: ["9888:9888"]
+    volumes: ["recon:/data"]
+    command: ["ozone", "recon"]
+  # Serves state/metrics/metrics (lab_* gauges: lab clock, job running, fault on) to Prometheus.
+  labmeta:
+    image: ${OZONE_IMAGE:-apache/ozone:2.0.0}
+    command: ["python3", "-m", "http.server", "9100", "--directory", "/lab-metrics"]
+    volumes: ["./state/metrics:/lab-metrics:ro"]
+    restart: unless-stopped
+  prometheus:
+    image: quay.io/prometheus/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-admin-api
+      - --web.enable-lifecycle
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom:/prometheus
+      - ./exports:/exports
+    restart: unless-stopped
+  perses:
+    image: persesdev/perses:v0.55.0
+    command: ["--config=/etc/perses/config.yaml"]
+    ports: ["8080:8080"]
+    volumes:
+      - ./perses/config.yaml:/etc/perses/config.yaml:ro
+      - ./perses/provisioning:/etc/perses/provisioning:ro
+    restart: unless-stopped
+
+volumes:
+  scm1: {}
+  scm2: {}
+  scm3: {}
+  om1: {}
+  om2: {}
+  om3: {}
+  dn1: {}
+  recon: {}
+  prom: {}

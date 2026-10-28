@@ -1,0 +1,21 @@
+# Replay an export from the cloud run (or any lab run): Prometheus with the exported TSDB,
+# no scraping, plus Perses with the same dashboard. Started by ./scenario.sh replay <file>.
+# Ports differ from the live lab (9091, 8081) so both can run at the same time.
+services:
+  prometheus:
+    image: quay.io/prometheus/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=100y
+    ports: ["9091:9090"]
+    volumes:
+      - ./replay/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./replay/data:/prometheus
+  perses:
+    image: persesdev/perses:v0.55.0
+    command: ["--config=/etc/perses/config.yaml"]
+    ports: ["8081:8080"]
+    volumes:
+      - ./perses/config.yaml:/etc/perses/config.yaml:ro
+      - ./perses/provisioning:/etc/perses/provisioning:ro

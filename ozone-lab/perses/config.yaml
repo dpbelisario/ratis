@@ -1,0 +1,11 @@
+security:
+  readonly: false
+  enable_auth: false
+database:
+  file:
+    folder: /perses
+    extension: json
+provisioning:
+  folders:
+    - /etc/perses/provisioning
+  interval: 1m

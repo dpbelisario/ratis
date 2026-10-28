@@ -1,0 +1,11 @@
+{
+  "kind": "Project",
+  "metadata": {
+    "name": "ozone"
+  },
+  "spec": {
+    "display": {
+      "name": "ozone"
+    }
+  }
+}

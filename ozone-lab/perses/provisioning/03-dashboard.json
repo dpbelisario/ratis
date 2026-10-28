@@ -1,0 +1,1647 @@
+{
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "ozone-rpc",
+    "project": "ozone"
+  },
+  "spec": {
+    "display": {
+      "name": "Ozone RPC"
+    },
+    "duration": "30m",
+    "refreshInterval": "10s",
+    "variables": [],
+    "panels": {
+      "intro": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Read me"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**Ozone incident lab** (Ozone 2.0.0, 3 OM + 3 SCM, lab RPC capacity 1:200).\n\nHow to read: a full OM queue alone does not mean failure. Check **completed calls/s**:\nhigh = busy, near 0 = stuck. Then check SCM 9863 (row 2): if SCM is slow, OM handlers wait on SCM.\nRow 3 follows a delete from OM to SCM. Row 4 shows if the SCM state machine keeps up.\n"
+            }
+          }
+        }
+      },
+      "p1": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Lab clock (hour)",
+            "description": "realtime profile: JST hour. accel profile: virtual hour (1 real minute = 1 lab hour)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "lab_clock_hour",
+                    "seriesNameFormat": "{{profile}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p2": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Jobs running (1 = running)",
+            "description": "job01 = 01:00 bulk delete, job10 = 10:00 write burst, seed = pre-load."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "lab_job_running",
+                    "seriesNameFormat": "{{task}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p3": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Fault active, writer on, writer clients alive",
+            "description": "Writer clients pile up when OM does not answer (each client = 5 threads)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "lab_fault_active",
+                    "seriesNameFormat": "fault active"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "lab_writer_on",
+                    "seriesNameFormat": "writer on"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "lab_writer_clients",
+                    "seriesNameFormat": "writer clients"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p4": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM call queue length",
+            "description": "Calls waiting for a handler. Lab limit = 5 handlers x 10 = 50 (production 100 x 100 = 10K)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_call_queue_length{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p5": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM busy handlers",
+            "description": "Handlers that are working on a call now. All busy + full queue = saturated."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_num_in_process_handler{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p6": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM completed calls/s",
+            "description": "Busy = high rate. Stuck = rate near 0 while the queue is full."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(rpc_rpc_processing_time_num_ops{job=\"ozone-om\",port=\"9862\"}[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p7": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM avg queue time and processing time (ms)",
+            "description": "Queue time grows first when handlers are slow. Processing time is the time inside the handler (includes waits on SCM)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_rpc_queue_time_avg_time{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "queue {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_rpc_processing_time_avg_time{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "proc {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p8": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM open connections",
+            "description": "Open TCP connections are not requests. Compare with the queue."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_num_open_connections{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p9": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM client backoff and dropped connections /s",
+            "description": "Backoff happens when the call queue is full (backoff must be enabled)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(rpc_rpc_client_backoff{job=\"ozone-om\",port=\"9862\"}[1m])",
+                    "seriesNameFormat": "backoff {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(rpc_num_dropped_connections{job=\"ozone-om\",port=\"9862\"}[1m])",
+                    "seriesNameFormat": "dropped {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p10": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM 9863 call queue length",
+            "description": "Production climbed in a straight line to 2.4K. Straight line = arrivals at a fixed rate, almost nothing completes."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_call_queue_length{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p11": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM 9863 busy handlers",
+            "description": "Lab limit = 5."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_num_in_process_handler{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p12": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM 9863 completed calls/s",
+            "description": "Only the SCM leader does real work. Followers answer 'not leader'."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(rpc_rpc_processing_time_num_ops{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p13": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM 9863 avg queue time and processing time (ms)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_rpc_queue_time_avg_time{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}",
+                    "seriesNameFormat": "queue {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_rpc_processing_time_avg_time{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}",
+                    "seriesNameFormat": "proc {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p14": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM 9863 queue growth (calls per minute)",
+            "description": "Slope of the queue. If SCM handlers do not finish, the OM times out after hdds.scmclient.rpc.timeout and sends the call again, so the slope = OM handlers / rpc timeout (production 100 / 15 min = 6.7/min = 400/h)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "deriv(rpc_call_queue_length{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}[5m]) * 60",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p15": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM block protocol calls/s by type",
+            "description": "AllocateScmBlock = writes. DeleteScmKeyBlocks = the OM KeyDeletingService sends deleted keys' blocks."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (hostname, type) (rate(scm_block_location_protocol_counter[1m])) > 0",
+                    "seriesNameFormat": "{{hostname}} {{type}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p16": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM block protocol avg time per call by type (ms)",
+            "description": "time / count, per type. A slow DeleteScmKeyBlocks holds a 9863 handler for that long."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "sum by (hostname, type) (rate(scm_block_location_protocol_time[1m])) / sum by (hostname, type) (rate(scm_block_location_protocol_counter[1m])) > 0",
+                    "seriesNameFormat": "{{hostname}} {{type}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p17": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM key deletes/s (user deletes)",
+            "description": "The 01:00 job shows here."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(om_metrics_num_key_deletes[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p18": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM deletedTable keys (estimate)",
+            "description": "Keys deleted by users but whose blocks are not yet handed to SCM. This is the OM-side 'pending delete' backlog."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rocksdb_om_db_deletedtable_estimate_num_keys",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p19": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "KeyDeletingService keys sent for purge / purged per s",
+            "description": "Runs every ozone.key.deleting.service.interval, at most ozone.key.deleting.limit.per.task keys per run."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(deleting_service_metrics_num_keys_sent_for_purge[1m])",
+                    "seriesNameFormat": "sent {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(deleting_service_metrics_num_keys_purged[1m])",
+                    "seriesNameFormat": "purged {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p20": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "KeyDeletingService run latency (ms)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "om_performance_metrics_key_deleting_service_latency_ms",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p21": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM deletedBlocks table (deleted block log, estimate)",
+            "description": "Transactions written by DeleteScmKeyBlocks through SCM Ratis. Drains when datanodes confirm deletes."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rocksdb_scm_db_deletedblocks_estimate_num_keys",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p22": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM block deleting service transactions/s",
+            "description": "created = added to the log, sent = sent to datanodes, completed = datanodes confirmed."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(scm_block_deleting_service_num_block_deletion_transaction_created[1m])",
+                    "seriesNameFormat": "created {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(scm_block_deleting_service_num_block_deletion_transaction_sent[1m])",
+                    "seriesNameFormat": "sent {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(scm_block_deleting_service_num_block_deletion_transaction_completed[1m])",
+                    "seriesNameFormat": "completed {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p23": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM Ratis apply lag (entries)",
+            "description": "Highest commit index minus each node's applied index. Growth = the state machine cannot keep up."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "scalar(max(ratis_server_peerCommitIndex{job=\"ozone-scm\"})) - ratis_state_machine_applyCompletedIndex{job=\"ozone-scm\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p24": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM Ratis write requests/s",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(ratis_server_clientWriteRequest_count{job=\"ozone-scm\"}[1m])",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p25": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM Ratis log sync time p99 (s)",
+            "description": "fsync of the Ratis log. Slow disk = slow every SCM write."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_log_worker_syncTime{job=\"ozone-scm\",quantile=\"0.99\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p26": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "SCM Ratis pending requests",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_server_numPendingRequestInQueue{job=\"ozone-scm\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p27": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Leader elections (SCM and OM)",
+            "description": "A step = a new election. Failover retries in the OM log come with this."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_leader_election_electionCount{job=~\"ozone-scm|ozone-om\"}",
+                    "seriesNameFormat": "{{job}} {{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p28": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Seconds since last leader election",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_leader_election_lastLeaderElapsedTime{job=~\"ozone-scm|ozone-om\"} / 1000",
+                    "seriesNameFormat": "{{job}} {{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p29": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM Ratis apply lag (entries)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "scalar(max(ratis_server_peerCommitIndex{job=\"ozone-om\"})) - ratis_state_machine_applyCompletedIndex{job=\"ozone-om\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p30": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM key commits and block allocations /s",
+            "description": "Normal write traffic. Each new block = 1 AllocateScmBlock call from OM to SCM 9863."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(om_metrics_num_key_commits[1m])",
+                    "seriesNameFormat": "commit {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(om_metrics_num_block_allocations[1m])",
+                    "seriesNameFormat": "alloc {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p31": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "OM keys (estimate)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rocksdb_om_db_keytable_estimate_num_keys",
+                    "seriesNameFormat": "keyTable {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rocksdb_om_db_filetable_estimate_num_keys",
+                    "seriesNameFormat": "fileTable {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p32": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "JVM GC time ms/s (OM and SCM)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(jvm_metrics_gc_time_millis{job=~\"ozone-om|ozone-scm\"}[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p33": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "JVM heap used (MB)",
+            "description": ""
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "jvm_metrics_mem_heap_used_m{job=~\"ozone-om|ozone-scm\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "p34": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "JVM blocked threads",
+            "description": "Many blocked threads = lock contention."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "jvm_metrics_threads_blocked{job=~\"ozone-om|ozone-scm\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Read me",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 4,
+              "content": {
+                "$ref": "#/spec/panels/intro"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "0. Lab markers (when did the scheduled jobs and the fault run?)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p1"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p2"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "1. OM client RPC, port 9862 (is the OM busy or stuck?)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p4"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p5"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p6"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p7"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p8"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "2. SCM block RPC, port 9863 (ScmBlockLocationProtocolService)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p10"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p11"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p12"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p13"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p14"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p15"
+              }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p16"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "3. Delete path: OM deletedTable -> KeyDeletingService -> SCM deleted block log",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p17"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p18"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p19"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p20"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p21"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p22"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "4. SCM Ratis (state machine on port 9894)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p23"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p24"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p25"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p26"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p27"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p28"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "5. OM Ratis, OM write work, JVM",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p29"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p30"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p31"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p32"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p33"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p34"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

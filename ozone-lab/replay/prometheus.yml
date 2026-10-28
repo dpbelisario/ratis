@@ -1,0 +1,4 @@
+# Replay only: no scrape targets. Data comes from ./replay/data (an exported TSDB snapshot).
+global:
+  scrape_interval: 1m
+scrape_configs: []

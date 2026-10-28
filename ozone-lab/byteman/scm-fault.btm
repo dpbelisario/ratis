@@ -1,0 +1,45 @@
+# Byteman rules loaded into every SCM at start (BYTEMAN_SCRIPT in docker-compose.yaml).
+# They do nothing until a flag file exists inside the SCM container:
+#   /tmp/lab-fault/block-delay-ms   -> each AllocateScmBlock call sleeps that many ms
+#   /tmp/lab-fault/delete-delay-ms  -> each DeleteScmKeyBlocks call sleeps that many ms
+# ./scenario.sh fault-on scm-slow / fault-off writes and removes the files.
+# The sleep happens inside the SCM RPC handler thread on port 9863, so it models
+# "SCM block handlers are slow" while SCM stays healthy and stays leader.
+
+RULE lab slow AllocateScmBlock
+CLASS org.apache.hadoop.hdds.scm.server.SCMBlockProtocolServer
+METHOD allocateBlock
+AT ENTRY
+BIND f:java.io.File = new java.io.File("/tmp/lab-fault/block-delay-ms")
+IF f.exists()
+DO delay(Integer.parseInt(java.nio.file.Files.readString(f.toPath()).trim()))
+ENDRULE
+
+RULE lab slow DeleteScmKeyBlocks
+CLASS org.apache.hadoop.hdds.scm.server.SCMBlockProtocolServer
+METHOD deleteKeyBlocks
+AT ENTRY
+BIND f:java.io.File = new java.io.File("/tmp/lab-fault/delete-delay-ms")
+IF f.exists()
+DO delay(Integer.parseInt(java.nio.file.Files.readString(f.toPath()).trim()))
+ENDRULE
+
+# /tmp/lab-fault/hold -> each AllocateScmBlock / DeleteScmKeyBlocks call blocks until the
+# file is removed (scenario.sh fault-on scm-stuck). Models "SCM block handlers never finish".
+RULE lab hold AllocateScmBlock
+CLASS org.apache.hadoop.hdds.scm.server.SCMBlockProtocolServer
+METHOD allocateBlock
+AT ENTRY
+BIND f:java.io.File = new java.io.File("/tmp/lab-fault/hold")
+IF f.exists()
+DO java.lang.Runtime.getRuntime().exec("/opt/lab/hold.sh").waitFor()
+ENDRULE
+
+RULE lab hold DeleteScmKeyBlocks
+CLASS org.apache.hadoop.hdds.scm.server.SCMBlockProtocolServer
+METHOD deleteKeyBlocks
+AT ENTRY
+BIND f:java.io.File = new java.io.File("/tmp/lab-fault/hold")
+IF f.exists()
+DO java.lang.Runtime.getRuntime().exec("/opt/lab/hold.sh").waitFor()
+ENDRULE

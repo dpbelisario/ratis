@@ -1,0 +1,52 @@
+# Ozone settings, passed to every Ozone container as environment.
+# Format: <FILE>_<key>=<value>. The image entrypoint writes them into the XML files.
+
+CORE-SITE.XML_fs.defaultFS=ofs://omservice/
+CORE-SITE.XML_fs.trash.interval=0
+
+# --- OM HA (3 nodes, service id "omservice") ---
+OZONE-SITE.XML_ozone.om.service.ids=omservice
+OZONE-SITE.XML_ozone.om.nodes.omservice=om1,om2,om3
+OZONE-SITE.XML_ozone.om.address.omservice.om1=om1
+OZONE-SITE.XML_ozone.om.address.omservice.om2=om2
+OZONE-SITE.XML_ozone.om.address.omservice.om3=om3
+
+# --- SCM HA (3 nodes, service id "scmservice") ---
+OZONE-SITE.XML_ozone.scm.service.ids=scmservice
+OZONE-SITE.XML_ozone.scm.nodes.scmservice=scm1,scm2,scm3
+OZONE-SITE.XML_ozone.scm.address.scmservice.scm1=scm1
+OZONE-SITE.XML_ozone.scm.address.scmservice.scm2=scm2
+OZONE-SITE.XML_ozone.scm.address.scmservice.scm3=scm3
+OZONE-SITE.XML_ozone.scm.primordial.node.id=scm1
+OZONE-SITE.XML_hdds.scm.safemode.min.datanode=1
+
+# --- storage (1 datanode, so replication ONE) ---
+OZONE-SITE.XML_ozone.metadata.dirs=/data/metadata
+OZONE-SITE.XML_ozone.scm.datanode.id.dir=/data/metadata
+OZONE-SITE.XML_hdds.datanode.dir=/data/hdds
+OZONE-SITE.XML_ozone.server.default.replication=1
+OZONE-SITE.XML_ozone.replication=1
+OZONE-SITE.XML_ozone.scm.container.size=1GB
+OZONE-SITE.XML_ozone.scm.datanode.ratis.volume.free-space.min=10MB
+OZONE-SITE.XML_hdds.datanode.volume.min.free.space=100MB
+OZONE-SITE.XML_ozone.datanode.pipeline.limit=1
+OZONE-SITE.XML_hdds.container.report.interval=60s
+OZONE-SITE.XML_ozone.http.basedir=/tmp/ozone_http
+OZONE-SITE.XML_ozone.recon.db.dir=/data/metadata/recon
+OZONE-SITE.XML_ozone.recon.address=recon:9891
+OZONE-SITE.XML_ozone.recon.http-address=0.0.0.0:9888
+
+# --- the incident model: small RPC capacity (1:200 of production) ---
+# Production OM: 100 handlers x queue 100 per handler = 10,000 call-queue slots.
+# Lab OM:          5 handlers x queue  10 per handler =     50 call-queue slots.
+# SCM block port 9863 (ScmBlockLocationProtocolService) uses the same ratio.
+OZONE-SITE.XML_ozone.om.handler.count.key=5
+OZONE-SITE.XML_ozone.scm.block.handler.count.key=5
+OZONE-SITE.XML_ipc.server.handler.queue.size=10
+
+# --- Prometheus /prom endpoint (default true, set for clarity) ---
+OZONE-SITE.XML_hdds.prometheus.endpoint.enabled=true
+
+OZONE_CONF_DIR=/etc/hadoop
+OZONE_LOG_DIR=/var/log/hadoop
+no_proxy=om1,om2,om3,scm1,scm2,scm3,datanode,recon,localhost,127.0.0.1
