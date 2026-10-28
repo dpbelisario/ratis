@@ -74,7 +74,7 @@ hm2min() { local h=${1%%:*} m=${1##*:}; echo $((10#$h * 60 + 10#$m)); }
 lab_clock() {
   if [ "$LAB_PROFILE" = accel ]; then
     local t0 start el vmin
-    t0=$(cat state/t0 2>/dev/null || date +%s)
+    t0=$(cat state/t0 2>/dev/null || date +%s)   # no t0 yet (before the scheduler starts) = lab ACCEL_START
     start=$(hm2min "$ACCEL_START")
     el=$(( $(date +%s) - t0 ))
     vmin=$(( start + el * 60 / SEC_PER_LAB_HOUR ))
@@ -544,6 +544,7 @@ cmd_ensure() {  # cloud helper: safe to run any number of times
 
 cmd_accel_day() {
   export LAB_PROFILE=accel
+  rm -f state/t0
   [ "$(cat state/profile 2>/dev/null)" = accel ] && [ "$(prom_targets_up)" = 7 ] || cmd_up
   [ "$(pool_keys)" -gt 0 ] || cmd_seed
   log "accel-day: lab $ACCEL_START -> $ACCEL_END, 1 lab hour = $SEC_PER_LAB_HOUR s, schedule $SCHEDULE"
@@ -554,7 +555,7 @@ cmd_accel_day() {
     sleep 60
     echo "================ $(lab_clock)"; cmd_status
   done
-  rm -f state/scheduler.pid state/writer.on
+  rm -f state/scheduler.pid state/writer.on state/t0
   kill_load
   cmd_fault_off >/dev/null 2>&1
   cmd_export "lab-accel-$(TZ="$LAB_TZ" date +%Y%m%d-%H%M)"

@@ -5,3 +5,4 @@ exports/
 replay/data/
 replay/events.log
 lab.env
+dist/

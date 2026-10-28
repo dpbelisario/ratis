@@ -111,7 +111,6 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom:/prometheus
-      - ./exports:/exports
     restart: unless-stopped
   perses:
     image: persesdev/perses:v0.55.0
