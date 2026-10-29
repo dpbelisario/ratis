@@ -39,14 +39,15 @@ All numbers are lab numbers (scale 1:200, see section 7).
 Main result: **the straight line on SCM 9863 is what retries look like when SCM block
 handlers do not finish.** An OM handler waits for SCM until `hdds.scmclient.rpc.timeout`
 (default **15m**). Then the OM client fails over and sends the call again. The old call
-stays in the SCM queue. So the SCM queue grows by about one call per OM handler per
+stays in the SCM queue. So the SCM queue grows by one to two calls per OM handler per
 timeout:
 
 ```
-slope = OM handlers / hdds.scmclient.rpc.timeout
-lab (accel profile, timeout 15s):  5 / 15 s  = +5 per 15 s   (measured: +5 per 15-20 s)
-production (defaults):            100 / 15 min = 6.7/min = 400/hour
-06:30 -> 11:00 = 4.5 h x 400/h  = about 1,800   (production showed about 2,400)
+slope = k x OM handlers / hdds.scmclient.rpc.timeout      (k measured 1.2 - 1.8)
+lab, accel profile (timeout 15s):  +6 per 15 s with 5 handlers   (k = 1.2)
+lab, realtime profile (timeout 15m): +9 per 15 min with 5 handlers (k = 1.8, section 2.2)
+production (100 handlers, 15m):    120 - 180 per 15 min = 480 - 720 per hour
+06:30 -> 11:00 (4.5 h):            about 2,200 - 3,200   (production showed about 2,400)
 ```
 
 So the straight line does **not** mean "the load increased at 06:00". It means "at
@@ -88,6 +89,61 @@ What this shows:
 
 Screenshot of the dashboard for this day: `docs/accel-run1.png` (in the bundle).
 
+### 2.2 The real-time day in the cloud (realtime profile, 2026-10-29 JST)
+
+The same schedule on the JST wall clock, with production's default OM->SCM timeout (15m).
+Every event fired on time: job01 at 01:00:00, fault-on at 06:00:01, job10 at 10:00:00,
+fault-off at 11:00:01, OM leader restart at 11:00:25. Export: `lab-realtime-20261029.tar.gz`.
+Gaps in the data: 18:37-20:18 (cloud machine paused) and about 04:00-04:04 (cloud machine
+restarted; `ensure` brought the lab back).
+
+| JST | OM queue | OM busy | OM done/s | SCM 9863 queue | SCM busy | SCM done/s | OM deletedTable | Writer clients | Fault |
+|---|---|---|---|---|---|---|---|---|---|
+| 00 | 0 | 1 | 9.6 | 0 | 0 | 4.5 | 0 | 1 | - |
+| 01 (job01: 30,000 deletes in 40 s, peak about 980 deletes/s, OM queue 15 for a moment) | 0 | 5 | 9.6 | 0 | 1 | 4.6 | 30,000 | 1 | - |
+| 02 | 0 | 0 | 9.6 | 0 | 1 | 4.6 | 18,700 | 1 | - |
+| 03 | 0 | 1 | 9.6 | 0 | 1 | 4.5 | 12,700 | 1 | - |
+| 04 | 0 | 1 | 9.6 | 0 | 1 | 4.6 | 6,700 | 1 | - |
+| 05 | 0 | 0 | 9.6 | 0 | 0 | 4.6 | 900 | 1 | - |
+| 06 (fault-on scm-stuck) | 50 | 5 | 0 | 31 | 5 | 0 | 0 | 12 | on |
+| 07 | 50 | 5 | 0 | **50 (full)** | 5 | 0 | 0 | 12 | on |
+| 08-09 | 50 | 5 | 0 | 50 | 5 | 0 | 0 | 12 | on |
+| 10 (job10: 10,000 keys, waits) | 50 | 5 | 0 | 50 | 5 | 0 | 0 | 12 | on |
+| 11 (fault-off, restart OM leader) | 50 -> 0 | 5 | 12 | 50 -> 0 | 5 | 4.5 | 0 | 12 -> 2 | off |
+
+Values per hour: queues and busy = maximum, rates = median.
+
+From 06:00, every 15 minutes:
+
+| JST | 06:00 | 06:15 | 06:30 | 06:45 | 07:00 | 07:15 | 07:30 | 07:45 |
+|---|---|---|---|---|---|---|---|---|
+| SCM 9863 queue | 0 | 4 | 13 | 22 | 31 | 40 | 49 | 50 (limit) |
+| OM queue | 0 | 11 | 27 | 43 | 50 (limit) | 50 | 50 | 50 |
+
+- **The SCM 9863 queue grew by 9 every 15 minutes**: a straight line made of steps, one step
+  per `hdds.scmclient.rpc.timeout` (15m). The first OM failover log lines came at 06:15,
+  exactly one timeout after the fault started. That is 1.8 calls per OM handler per
+  timeout (5 handlers). The lab does not show yet where the extra 0.8 comes from:
+  KeyDeletingService calls and the failover retry chain are the likely sources.
+- Scaled to production (100 handlers, 15m): 100 x 1.8 = 180 per 15 minutes = 720 per hour.
+  With 1.0 to 1.8 calls per handler per timeout, 06:30 -> 11:00 gives 1,800 to 3,240.
+  Production showed about 2,400. **Check the slope in production**
+  (`deriv(...[30m]) * 3600`, section 8): a value in the hundreds per hour with SCM done/s
+  near 0 means "retries of calls SCM does not finish", not "more load".
+- **No SCM leader election during the fault** (the counter stayed at 2; it moved only
+  when the containers were recreated at 04:03). OM failover log lines grew steadily,
+  about 90 per hour (`lab_om_failover_log_lines_total`: 36 at 06:30, 522 at 11:00).
+- **OM open connections climbed in a straight line**: 12 at 06:30, 115 at 09:00, 215 at
+  11:00 (about 48 per hour). Clients that gave up were replaced by new clients, and the
+  OM did not close the old connections while its queue was full. Production may show the
+  same: a rising connection count is a symptom here, not extra load.
+- The 01:00 delete backlog drained before the fault started (deletedTable 0 at 06:00).
+  At lab scale, the delete did not cause the climb; the injected fault did.
+- Release at 11:00: both queues went from 50 to 0 within 15 s; job10 then finished all
+  10,000 keys at 11:01.
+
+Screenshot: `docs/realtime-day1.png`.
+
 ## 3. Two ways to use the lab
 
 **A. View the cloud run, like you view production.** A cloud machine ran the lab on the
@@ -113,12 +169,11 @@ back with its disk but with no processes. On 2026-10-28 it was paused from about
 recreates the containers (data stays in the volumes) and re-applies an active fault. The
 session now keeps a background task running through the night so the machine stays up.
 
-The first cloud day: the scheduler started at 18:25 JST on 2026-10-28 (writer on). It runs
-job01 at 01:00, fault-on at 06:00, job10 at 10:00 and fault-off + restart at 11:00 JST on
-2026-10-29. Two daily Routines (01:00 and 10:00 JST) check that the jobs ran and rerun them
-if the cloud machine was replaced. The export `lab-realtime-20261029.tar.gz` comes after
-11:20 JST. The accel day of section 2.1 is in `lab-accel-20261028-1820.tar.gz`; you can
-replay it now.
+The first cloud day ran from 18:25 JST on 2026-10-28 to 11:20 JST on 2026-10-29: job01 at
+01:00, fault-on at 06:00, job10 at 10:00 and fault-off + restart at 11:00 JST (results in
+section 2.2). Its export is `lab-realtime-20261029.tar.gz`. Two daily Routines (01:00 and
+10:00 JST) check that the jobs ran and rerun them if the cloud machine was replaced. The
+accel day of section 2.1 is in `lab-accel-20261028-1820.tar.gz`.
 
 **B. Run the lab on your laptop.** Two clock profiles:
 
@@ -409,7 +464,7 @@ nothing until `fault-on` writes a flag file in `/tmp/lab-fault/` inside the SCM 
 | `byteman/` | SCM fault rules |
 | `prometheus.yml` | Scrapes `/prom` every 5 s: om1-3:9874, scm1-3:9876, datanode:9882, labmeta |
 | `perses/make-dashboard.py` | Generates the "Ozone RPC" dashboard (36 panels in 6 rows + a read-me panel) |
-| `docs/accel-run1.png` | Dashboard screenshot of the accel day in section 2.1 |
+| `docs/accel-run1.png`, `docs/realtime-day1.png` | Dashboard screenshots of the days in sections 2.1 and 2.2 |
 | `docker-compose.replay.yaml`, `replay/` | Replay stack for exports |
 | `make-bundle.sh` | Builds `dist/setup.sh` |
 
