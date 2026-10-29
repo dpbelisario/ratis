@@ -49,7 +49,7 @@ cd "$LAB_DIR" || exit 1
                                       #  like production's pending-delete backlog during the incident)
 : "${JOB10_KEYS:=10000}"               # 10:00 burst: keys to write ...
 : "${JOB10_THREADS:=40}"               # ... with this many threads
-: "${FAULT_MODE:=scm-ratis-stuck}"     # scm-ratis-stuck | scm-stuck | scm-slow | cpu-all | cpu | followers | pause | delay
+: "${FAULT_MODE:=scm-stuck}"           # scm-stuck | scm-ratis-stuck | scm-slow | cpu-all | cpu | followers | pause | delay
 : "${FAULT_BLOCK_DELAY_MS:=2000}"       # scm-slow: sleep per SCM 9863 block call (5 handlers -> 2.5 calls/s max)
 : "${FAULT_CPUS:=0.02}"                # cpu faults: CPUs left to each throttled SCM
 : "${FAULT_DELAY:=500ms}"              # delay fault: added latency on the SCM leader's network
