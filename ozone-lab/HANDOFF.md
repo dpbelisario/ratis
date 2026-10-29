@@ -98,6 +98,56 @@ Grep the production SCM and OM logs for the strings above first: it is the cheap
    It shows where the 9863 handlers wait and what the lock holder is doing (RocksDB,
    Ratis, disk, or a second lock = deadlock). This is the decisive evidence.
 
+## 0.1 Possible causes, indexed (2026-10-29, from metrics, team meetings and the lab)
+
+Facts used:
+- F1 OM queue (9862): 15-minute steps from about 06:30 to 10K (about 09:30), then full.
+- F2 SCM block queue (9863): straight line from about 06:30 to about 2.4K.
+- F3 Backup jobs write about 1,000 requests/s at 01:00 (and at 10:00), about 100 TB per day.
+  The team saw write load until about 04:00 and none after. The climb started with no backup load.
+- F4 OM log: failover retries, "retry failure". The OM kept calling SCM1 after the SCM leadership moved to SCM2.
+- F5 All processes were up. SCM UI and commands worked. OM UI and all OM commands did not work.
+  After an OM restart: no errors in the OM log, and the OM still did not work.
+- F6 Fix: move SCM leadership away from SCM1, restart SCM1, move leadership back, restart all.
+- F7 All 3 OMs could not stop gracefully. Only the SCM leader was stopped; whether it stopped
+  gracefully is not clear (the meeting notes say both).
+- F8 Recon shows a large pending delete. Deletes are done by an LCM script (no trash), time unknown.
+  Deletes started to run after the restart.
+- F9 Recon pulls the OM DB (about 100 GB) as a full snapshot over HTTP, and delta updates over OM RPC (9862).
+- F10 Ozone 2.0.0. Disk (HDD) about 75 % used.
+- Lab: a straight SCM line appears only if the SCM block handlers finish nothing (L1). The OM
+  steps are client retries every 15 minutes (L2). An SCM stuck this way makes OM restarts useless (L3).
+
+Deductions:
+- D1 The problem was inside the SCM1 process, not in data shared by all SCMs: with SCM2 as
+  leader and SCM1 restarted, it worked (F6). A bad replicated entry would also stop SCM2.
+- D2 The SCM1 process was alive (UI, commands, leadership transfer worked, F5, F6). Only its
+  block path (9863) was stuck. A whole-JVM stop (long GC) is less likely.
+- D3 The OM kept calling SCM1 (F4) because its calls were in the SCM1 queue, and the stuck SCM1
+  handlers could not even answer "not leader". A restart of SCM1 removed that queue.
+
+| # | Cause | Likelihood | For | Against | Check |
+|---|---|---|---|---|---|
+| C1 | A thread in the SCM1 block path (lock holder) stuck **without a timeout**; all 9863 handlers wait for it | High (mechanism) | F2, L1, D1, D2, D3, F6 | none known | `jstack` of the SCM leader next time |
+| C1a | ...because of a RocksDB write stall or a very slow flush on SCM1 after the 01:00-04:00 metadata burst | Medium-high | F3, F10 (HDD), D1; team saw slow flush during the batch | not measured yet | SCM RocksDB pending compaction / stall metrics, SCM log "Stalling writes" |
+| C1b | ...because of a slow or stuck disk on SCM1 | Medium | F10 (HDD, 75 %), D1 | not measured | node disk latency / iowait on SCM1 at 06:00; `ratis_log_worker_syncTime` on SCM1 |
+| C1c | ...because of a lock deadlock in SCM (code bug) | Medium | D1, D2, F6 (restart clears it) | no proof without a thread dump | `jstack` next time |
+| C2 | Large-delete bugs in 2.0.0 (HDDS-11633 delete batch > 32 MB fails the Raft write; HDDS-11712/11713 SCM loops over millions of delete records) | Medium (as trigger) | F8, F10 | HDDS-11633 alone fails fast, it does not hang | grep SCM log: "Skip writing the deleted blocks info", "exceeds the max buffer limit"; DeleteScmKeyBlocks time per call |
+| C3 | SCM1 garbage collection (HDDS-12087: delete records fill SCM memory, GC pauses of 5-6 minutes) | Low-medium | F8, F10 | D2: SCM UI and leadership transfer worked; long GC freezes all | SCM heap and GC time 01:00-06:30; log `JvmPauseMonitor`, "close-threshold" |
+| C4 | Recon snapshot or delta update overloads the OM (team idea) | Low (as root cause) | F9, F3 | it loads the OM, but the SCM queue can only fill if the SCM finishes nothing (L1); the fix needed an SCM1 restart (F6) | Recon log: snapshot/delta times and sizes vs 06:00 |
+| C4b | Recon pulls the **SCM** DB snapshot from SCM1 and this triggers C1a | Low-medium | F9 (Recon also reads the SCM DB), D1 | timing not known | SCM1 HTTP log for `/dbCheckpoint` near 06:00, Recon log |
+| C5 | An OM-side problem (OM Ratis, OM RocksDB, OM bug) | Low | F5 (OM did not work) | the SCM queue filled with OM calls; OM restarts did not help until SCM1 restarted (F5, F6) | OM `jstack` next time |
+| C6 | More user load | Very low | - | F3: no backup load at 06:00; the lines are retry steps (L2) | - |
+| C7 | OM-SCM connections or sockets exhausted | Low | team idea | 2.4K calls reached the SCM1 queue, so the connection worked | - |
+| C8 | SCM leader confusion / OM calls a non-leader | Low (it is a result) | F4 | explained by D3 | - |
+| C9 | Datanode / pipeline problem (no open container for new blocks) | Low | team idea | that fails fast with an error, it does not leave calls unanswered | SCM log for pipeline/container allocation errors |
+| C10 | Overlapping cron runs (a job or the LCM script starts again before the last run ends) | Low | team mentioned cron overlap | no load seen after 04:00 | script schedules and run logs |
+| C11 | OM garbage collection | Very low | - | the SCM queue would go down, not up | - |
+
+Open questions: Did the SCM leader stop gracefully or not (F7)? When does the LCM delete script
+run? Which clients called the OM from 06:00 to 10:00 (the 830 calls per 15 minutes)? When does
+Recon pull the OM and SCM snapshots? What was the RPC time peak at about 21:00 the day before?
+
 ## 1. The problem, in simple words
 
 - At about 06:30, the OM call queue (port 9862) started to climb. It stayed full at
