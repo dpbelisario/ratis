@@ -11,6 +11,69 @@ Rules:
 
 ---
 
+## 0. Verdict so far (2026-10-29)
+
+**Not additional load, not an OM problem: from about 06:00 the SCM leader stopped finishing
+block allocations, and both climbing lines are retries.**
+
+1. **SCM 9863 line = OM handlers re-sending.** An OM handler that calls SCM `AllocateScmBlock`
+   waits `hdds.scmclient.rpc.timeout` (15m), then fails over and sends the call again. The old
+   call stays in the SCM queue. 100 OM handlers cannot put 2,400 calls in that queue any other
+   way. Production: about 110 per 15 minutes for 5.5 hours.
+2. **OM line = clients re-sending.** With every OM handler waiting on SCM, client calls wait
+   `ozone.om.client.rpc.timeout` (also 15m, up to 500 retries), then the client sends again
+   and the old call stays in the OM queue. Production: about 830 per 15 minutes (about 830
+   waiting client threads), so 10K after 12 steps = 06:30 -> 09:30. Both lines in your graph
+   are 15-minute staircases for this reason.
+3. **The "failover" lines in the OM log are those retries.** In the lab there was no SCM
+   leader election at all while they grew.
+4. **Restarting the OMs cannot fix it**: the new OM handlers call the same stuck SCM and the
+   OM queue climbs again at once. That is the purple spike after the restart in the production
+   graph, while the SCM queue stays at 2.4K (lab drill: section 2.3).
+5. **An SCM leader whose Ratis state machine is stuck cannot stop gracefully** (lab: killed after
+   60 s), and restarting one SCM gives the same result, because the next leader must apply the
+   same log first. That matches what you saw on the one SCM node you restarted.
+
+**Where SCM gets stuck (the lab's best candidate).** SCM hands out block IDs from
+`SequenceIdGenerator` in batches of 1000 under one lock (`ozone.scm.sequence.id.batch.size`).
+A new batch is an SCM Ratis write. If one SCM Ratis write does not complete, the handler that
+holds the lock waits for it and every other `AllocateScmBlock` handler waits for the lock.
+SCM stays leader (heartbeats still work) and its metrics still look alive. In the lab, holding
+only the SCM Ratis state machine (`fault-on scm-ratis-stuck`) gave exactly this, in a thread
+dump of the SCM leader:
+
+```
+IPC Server handler 0..3 on 9863  WAITING (parking) on ReentrantLock  at SequenceIdGenerator.getNextId
+IPC Server handler 4 on 9863     TIMED_WAITING on CompletableFuture  (the Ratis write for the next batch)
+```
+
+These threads are WAITING, not BLOCKED, so `jvm_metrics_threads_blocked` stays at 0.
+
+**Why the Ratis write would not complete at 06:00: open.** In order of likelihood:
+- The SCM state machine stopped applying (apply lag grows): for example a RocksDB write stall
+  or long flush of the deleted block log built up after the 01:00 delete (the SCM HA
+  transaction buffer is flushed every 10 minutes).
+- The Ratis log stopped committing (commit index flat): for example one very large entry
+  (a DeleteScmKeyBlocks batch for keys with many blocks) that followers cannot take.
+- A slow disk on the SCM leader (Ratis log sync time in seconds).
+- Garbage collection is unlikely as the main cause: hours of GC pause would also stop Ratis
+  heartbeats (leader election) and the `/prom` scrapes. Check it anyway (query 6 below).
+
+**Next lead: look at the SCM leader between 05:30 and 06:30.**
+
+1. `ratis_server_peerCommitIndex{job="<scm>"}` and `ratis_state_machine_applyCompletedIndex{job="<scm>"}`:
+   which one stops first? Commit stops = replication problem. Apply stops = state machine / RocksDB.
+2. `ratis_log_worker_syncTime{quantile="0.99"}` and `ratis_server_numPendingRequestInQueue` on the SCM leader.
+3. `sum by (type) (rate(scm_block_location_protocol_counter[5m]))` and the time per type: did
+   `DeleteScmKeyBlocks` get slow between 01:00 and 06:00?
+4. `rocksdb_scm_db_deletedblocks_estimate_num_keys` and the SCM RocksDB pending compaction / stall metrics.
+5. The SCM leader log from 05:45 to 06:15: Ratis, StateMachine, DeletedBlockLog, SequenceIdGenerator,
+   "timeout". The first OM failover line should be about 15 minutes after the real start.
+6. `rate(jvm_metrics_gc_time_millis{processname="StorageContainerManager"}[5m])`, `jvm_metrics_threads_waiting`.
+7. **Next time it happens, before any restart:** three `jstack` dumps of the SCM leader, 10 s
+   apart. If the 9863 handlers sit in `SequenceIdGenerator.getNextId` / a Ratis future, this is
+   confirmed, and the dump also shows what the Ratis/apply thread is doing.
+
 ## 1. The problem, in simple words
 
 - At about 06:30, the OM call queue (port 9862) started to climb. It stayed full at
@@ -143,6 +206,26 @@ From 06:00, every 15 minutes:
   10,000 keys at 11:01.
 
 Screenshot: `docs/realtime-day1.png`.
+
+### 2.3 Restart drill with SCM stuck (realtime profile, 2026-10-29 12:15-12:32 JST)
+
+Fault `scm-ratis-stuck` (the SCM Ratis state machine stops applying, on all SCMs), then the
+production restart order:
+
+| Step | Result |
+|---|---|
+| Fault on, 2.5 min | SCM leader 9863 handlers 5/5 busy, OM leader handlers 5/5 busy, OM commits 0. No election. |
+| Stop all 3 OMs (60 s grace) | **All 3 stopped by themselves in 5 s** (exit 143). Production: OMs could not stop gracefully. Not reproduced yet (see below). |
+| Start all 3 OMs | Within 60 s the OM leader is again 5/5 busy, OM queue 15 -> 33, commits 0. **Restarting OMs does not help** (the purple spike after the restart in production). |
+| Stop the SCM leader (60 s grace) | **Did not stop: killed after 60 s** (exit 137). Its shutdown waits for the stuck state-machine thread. |
+| Start it again | **Same result**: the new SCM leader cannot apply the log, so it never becomes ready; OM stays stuck (queue 33, commits 0). The SCM 9863 queue now reads 0 on all SCMs (OM gets "not ready" answers and retries), so the SCM queue graph looks idle while nothing works. |
+| Release the fault | Everything works again within 20 s. |
+
+Why the OMs stopped cleanly in the lab: the drill was short (2.5 min) and no delete backlog was
+in flight, so the OM background delete threads were not waiting on SCM. The schedule now runs
+a 60,000-key delete at 01:00 (backlog busy until ~11:00, like production's pending deletes) and
+restarts all OMs at 11:00 **with the fault still on**, the SCM leader at 11:10, and releases at
+11:20. Each stop is logged as graceful or KILLED in `logs/events.log`.
 
 ## 3. Two ways to use the lab
 

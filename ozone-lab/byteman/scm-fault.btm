@@ -43,3 +43,16 @@ BIND f:java.io.File = new java.io.File("/tmp/lab-fault/hold")
 IF f.exists()
 DO java.lang.Runtime.getRuntime().exec("/opt/lab/hold.sh").waitFor()
 ENDRULE
+
+# /tmp/lab-fault/apply-hold -> the SCM Ratis state machine stops applying transactions
+# (scenario.sh fault-on scm-ratis-stuck). Ratis heartbeats continue, so SCM stays leader.
+# Every SCM write that waits for its Ratis transaction (new block-ID batch, new container,
+# deleted block log) then waits too.
+RULE lab hold SCM state machine apply
+CLASS org.apache.hadoop.hdds.scm.ha.SCMStateMachine
+METHOD applyTransaction
+AT ENTRY
+BIND f:java.io.File = new java.io.File("/tmp/lab-fault/apply-hold")
+IF f.exists()
+DO java.lang.Runtime.getRuntime().exec("/opt/lab/hold.sh apply-hold").waitFor()
+ENDRULE

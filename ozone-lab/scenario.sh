@@ -31,7 +31,7 @@ cd "$LAB_DIR" || exit 1
 : "${SEC_PER_LAB_HOUR:=60}"            # accel only: real seconds per lab hour
 : "${ACCEL_START:=00:00}"              # accel only: lab time when the scheduler starts
 : "${ACCEL_END:=12:00}"                # accel only: scheduler stops at this lab time (empty = never)
-: "${GRACE_MIN:=10}"                   # on scheduler start, events up to this many lab minutes old still fire
+: "${GRACE_MIN:=20}"                   # an event fires up to this many lab minutes after its time, not later
 : "${VOLUME:=vol1}"
 : "${BUCKET:=obs}"                     # obs (OBJECT_STORE) or fso (FILE_SYSTEM_OPTIMIZED)
 : "${SEED_KEYS:=30000}"                # 30,000 lab keys ~ 6,000,000 production keys at 1:200
@@ -40,16 +40,21 @@ cd "$LAB_DIR" || exit 1
 : "${WRITER_INTERVAL:=10}"             # normal traffic: start one client every N real seconds ...
 : "${WRITER_KEYS:=50}"                 # ... that writes this many keys ...
 : "${WRITER_THREADS:=5}"               # ... with this many threads ...
-: "${WRITER_MAX_CLIENTS:=12}"          # ... and at most this many clients alive (stuck clients pile up)
-: "${JOB01_THREADS:=20}"               # 01:00 bulk delete: parallel delete threads
-: "${JOB01_KEYS:=$SEED_KEYS}"          # 01:00 bulk delete: delete the oldest written batches up to this many keys
+: "${WRITER_MAX_CLIENTS:=8}"           # ... and at most this many clients alive (stuck clients pile up)
+                                      # 8 x 5 threads = 8 waiting client threads per OM handler (production ~830/100)
+: "${JOB01_THREADS:=10}"               # 01:00 bulk delete: delete threads per batch
+: "${JOB01_PARALLEL:=8}"               # 01:00 bulk delete: batches deleted at the same time (1 JVM each)
+: "${JOB01_KEYS:=60000}"              # 01:00 bulk delete: oldest written batches up to this many keys
+                                      # (60,000 at 100 per minute keeps the delete backlog busy until ~11:00,
+                                      #  like production's pending-delete backlog during the incident)
 : "${JOB10_KEYS:=10000}"               # 10:00 burst: keys to write ...
 : "${JOB10_THREADS:=40}"               # ... with this many threads
-: "${FAULT_MODE:=scm-stuck}"           # scm-stuck | scm-slow | cpu-all | cpu | followers | pause | delay (see cmd_fault_on)
+: "${FAULT_MODE:=scm-ratis-stuck}"     # scm-ratis-stuck | scm-stuck | scm-slow | cpu-all | cpu | followers | pause | delay
 : "${FAULT_BLOCK_DELAY_MS:=2000}"       # scm-slow: sleep per SCM 9863 block call (5 handlers -> 2.5 calls/s max)
 : "${FAULT_CPUS:=0.02}"                # cpu faults: CPUs left to each throttled SCM
 : "${FAULT_DELAY:=500ms}"              # delay fault: added latency on the SCM leader's network
-: "${RESTART_TARGET:=om-leader}"       # what the 11:00 "restart" restarts
+: "${RESTART_TARGET:=om-leader}"       # default target of "restart" (a schedule line can name one)
+: "${RESTART_GRACE:=60}"               # seconds a stopping service gets before it is killed
 : "${CLIENT_HEAP:=384m}"               # heap of each freon client JVM
 : "${PROM_URL:=http://localhost:9090}"
 # OM log lines that show OM -> SCM retries / failover (startup lines excluded)
@@ -65,8 +70,9 @@ now_lab() { TZ="$LAB_TZ" date '+%F %T %Z'; }
 log() { echo "$(now_lab) [$(lab_clock | cut -d' ' -f2)] $*" | tee -a logs/events.log >&2; }
 die() { echo "error: $*" >&2; exit 1; }
 cid() { dc ps -q "$1" 2>/dev/null; }
-freon() {  # freon <args...>   runs in the client container
-  dc exec -T -e OZONE_HEAPSIZE_MAX="$CLIENT_HEAP" client ozone freon "$@"
+freon() {  # freon <args...>   runs in the client container (stdin from /dev/null: it is often
+           # called inside "while read" loops, and docker compose exec would eat the loop's input)
+  dc exec -T -e OZONE_HEAPSIZE_MAX="$CLIENT_HEAP" client ozone freon "$@" < /dev/null
 }
 succ() { sed -n 's/.*Successful executions: \([0-9]*\).*/\1/p' "$1" | tail -1; }
 
@@ -114,7 +120,15 @@ leaders() {
   om=$(timeout 90 docker compose exec -T client ozone admin om roles -id omservice 2>/dev/null | awk '/LEADER/ {print $1}')
   echo "scm=${scm:-unknown} om=${om:-unknown}"
 }
-scm_leader() { leaders | sed -n 's/.*scm=\([^ ]*\).*/\1/p'; }
+scm_leader() {  # from "ozone admin scm roles"; if SCM cannot answer, the SCM that served 9863 calls
+  local l
+  l=$(leaders | sed -n 's/.*scm=\([^ ]*\).*/\1/p')
+  if [ -z "$l" ] || [ "$l" = unknown ]; then
+    l=$(curl -s "$PROM_URL/api/v1/query" --data-urlencode 'query=topk(1, sum by (hostname) (increase(rpc_rpc_processing_time_num_ops{servername="ScmBlockLocationProtocolService"}[6h])))' |
+        python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["metric"]["hostname"] if r else "unknown")')
+  fi
+  echo "$l"
+}
 om_leader() { leaders | sed -n 's/.*om=\([^ ]*\).*/\1/p'; }
 
 write_metrics() {
@@ -202,24 +216,28 @@ run_job() {  # run_job <name> <function>: background, pid file, log file
   write_metrics
 }
 
-job01_body() {  # the "01:00" bulk delete: delete the oldest written batches, up to JOB01_KEYS keys
-  # obs bucket: one DeleteKey RPC per key (freon ockr, JOB01_THREADS threads)
+job01_body() {  # the "01:00" bulk delete: the oldest written batches, up to JOB01_KEYS keys
+  # obs bucket: one DeleteKey RPC per key (freon ockr), JOB01_PARALLEL batches at a time
   # fso bucket: one directory delete per batch (ozone fs -rm -r -skipTrash); the OM
   #             DirectoryDeletingService then moves the files to deletedTable in the background
-  local batches total=0 p n b
-  batches=$(pool_take_upto "$JOB01_KEYS")
-  total=$(echo "$batches" | awk '{s += $2} END {print s + 0}')
-  log "job01: bulk delete of $total keys ($(echo "$batches" | grep -c .) batches), $JOB01_THREADS threads"
+  local list total=0 p n b nb
+  list=$(mktemp)
+  pool_take_upto "$JOB01_KEYS" > "$list"
+  total=$(awk '{s += $2} END {print s + 0}' "$list"); nb=$(grep -c . "$list")
+  log "job01: bulk delete of $total keys ($nb batches, $JOB01_PARALLEL at a time, $JOB01_THREADS threads each)"
   local t0=$SECONDS
-  while read -r p n b; do
+  while read -r p n b <&3; do
     [ -n "$p" ] || continue
     b=${b:-$BUCKET}
+    while [ "$(jobs -rp | wc -l)" -ge "$JOB01_PARALLEL" ]; do wait -n; done
     if [ "$b" = fso ]; then
-      dc exec -T client ozone fs -rm -r -skipTrash "ofs://omservice/$VOLUME/$b/$p"
+      dc exec -T client ozone fs -rm -r -skipTrash "ofs://omservice/$VOLUME/$b/$p" < /dev/null > /dev/null 2>&1 &
     else
-      freon ockr -v "$VOLUME" -b "$b" -p "$p" -n "$n" -t "$JOB01_THREADS" -f
+      freon ockr -v "$VOLUME" -b "$b" -p "$p" -n "$n" -t "$JOB01_THREADS" -f > /dev/null 2>&1 &
     fi
-  done <<< "$batches"
+  done 3< "$list"
+  wait
+  rm -f "$list"
   log "job01: done in $((SECONDS - t0)) s"
 }
 
@@ -243,7 +261,8 @@ writer_client() {
   local p
   p="w-$(date +%s%N | cut -c1-13)"
   (
-    freon ockg -v "$VOLUME" -b "$BUCKET" -p "$p" -n "$WRITER_KEYS" -t "$WRITER_THREADS" -s "$KEY_SIZE" > "state/clients/$p.log" 2>&1
+    # -f: a failed key does not stop the client; like an application, it goes on and retries
+    freon ockg -v "$VOLUME" -b "$BUCKET" -p "$p" -n "$WRITER_KEYS" -t "$WRITER_THREADS" -s "$KEY_SIZE" -f > "state/clients/$p.log" 2>&1
     [ "$(succ "state/clients/$p.log")" = "$WRITER_KEYS" ] || cp "state/clients/$p.log" logs/
     pool_add "$p" "$WRITER_KEYS"
     rm -f "state/clients/$p.log" "state/clients/$p.pid"
@@ -288,9 +307,10 @@ cmd_fault_on() {
   # scm-slow: every 9863 AllocateScmBlock / DeleteScmKeyBlocks call sleeps FAULT_BLOCK_DELAY_MS
   #           inside the SCM handler (Byteman, byteman/scm-fault.btm); SCM stays healthy and leader
   # scm-stuck: every 9863 AllocateScmBlock / DeleteScmKeyBlocks call blocks until fault-off
+  # scm-ratis-stuck: the SCM Ratis state machine stops applying transactions (all SCMs)
   local mode=${1:-$FAULT_MODE} leader targets s id pid
   [ -s state/fault ] && { log "fault: already on ($(cat state/fault))"; return; }
-  if [ "$mode" = cpu-all ] || [ "$mode" = scm-slow ] || [ "$mode" = scm-stuck ]; then
+  if [ "$mode" = cpu-all ] || [ "$mode" = scm-slow ] || [ "$mode" = scm-stuck ] || [ "$mode" = scm-ratis-stuck ]; then
     targets="scm1 scm2 scm3"
   elif [ "$mode" = followers ]; then
     leader=$(scm_leader)
@@ -310,15 +330,16 @@ cmd_fault_on() {
         dc exec -T "$s" sh -c "mkdir -p /tmp/lab-fault && echo $FAULT_BLOCK_DELAY_MS > /tmp/lab-fault/block-delay-ms.tmp &&
           echo $FAULT_BLOCK_DELAY_MS > /tmp/lab-fault/delete-delay-ms && mv /tmp/lab-fault/block-delay-ms.tmp /tmp/lab-fault/block-delay-ms" ;;
       scm-stuck) dc exec -T "$s" sh -c "mkdir -p /tmp/lab-fault && touch /tmp/lab-fault/hold" ;;
+      scm-ratis-stuck) dc exec -T "$s" sh -c "mkdir -p /tmp/lab-fault && touch /tmp/lab-fault/apply-hold" ;;
       delay)
         pid=$(docker inspect -f '{{.State.Pid}}' "$id")
         sudo_if nsenter -t "$pid" -n tc qdisc add dev eth0 root netem delay "$FAULT_DELAY" ||
           { log "fault: netem failed (needs root, iproute2 and the sch_netem kernel module)"; return 1; } ;;
-      *) die "unknown fault mode $mode (scm-slow|scm-stuck|cpu|cpu-all|followers|pause|delay)" ;;
+      *) die "unknown fault mode $mode (scm-stuck|scm-ratis-stuck|scm-slow|cpu|cpu-all|followers|pause|delay)" ;;
     esac
   done
   echo "$mode $targets" > state/fault
-  log "fault: ON  mode=$mode on $targets ($(case $mode in cpu*) echo "cpus=$FAULT_CPUS";; scm-slow) echo "delay=${FAULT_BLOCK_DELAY_MS}ms per 9863 call";; scm-stuck) echo "9863 block calls held";; delay) echo "delay=$FAULT_DELAY";; *) echo frozen;; esac))"
+  log "fault: ON  mode=$mode on $targets ($(case $mode in cpu*) echo "cpus=$FAULT_CPUS";; scm-slow) echo "delay=${FAULT_BLOCK_DELAY_MS}ms per 9863 call";; scm-stuck) echo "9863 block calls held";; scm-ratis-stuck) echo "SCM state machine apply held";; delay) echo "delay=$FAULT_DELAY";; *) echo frozen;; esac))"
   write_metrics
 }
 cmd_fault_off() {
@@ -330,7 +351,7 @@ cmd_fault_off() {
     case "$mode" in
       cpu|cpu-all) docker update --cpus "$(nproc)" "$id" >/dev/null ;;
       pause|followers) dc unpause "$s" ;;
-      scm-slow|scm-stuck) dc exec -T "$s" rm -rf /tmp/lab-fault ;;
+      scm-slow|scm-stuck|scm-ratis-stuck) dc exec -T "$s" rm -rf /tmp/lab-fault ;;
       delay) pid=$(docker inspect -f '{{.State.Pid}}' "$id"); sudo_if nsenter -t "$pid" -n tc qdisc del dev eth0 root ;;
     esac
   done
@@ -340,32 +361,41 @@ cmd_fault_off() {
 }
 sudo_if() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
 
-cmd_restart() {
-  local t=${1:-$RESTART_TARGET} svc
+cmd_restart() {  # stop with RESTART_GRACE seconds, then start; logs whether each stop was graceful
+  local t=${1:-$RESTART_TARGET} svc x id code took t0
   case "$t" in
     none) log "restart: none"; return ;;
     om-leader) svc=$(om_leader) ;;
     scm-leader) svc=$(scm_leader) ;;
     om-all) svc="om1 om2 om3" ;;
+    scm-all) svc="scm1 scm2 scm3" ;;
     *) svc=$t ;;
   esac
-  log "restart: $t -> $svc"
+  log "restart: $t -> $svc (stop grace ${RESTART_GRACE}s)"
+  t0=$(date +%s)
   # shellcheck disable=SC2086
-  dc restart $svc
+  dc stop -t "$RESTART_GRACE" $svc > /dev/null 2>&1
+  for x in $svc; do
+    id=$(dc ps -a -q "$x"); code=$(docker inspect -f '{{.State.ExitCode}}' "$id" 2>/dev/null)
+    took=$(( $(date -d "$(docker inspect -f '{{.State.FinishedAt}}' "$id")" +%s) - t0 ))
+    log "restart: stop $x took ${took}s, exit $code $([ "$code" = 137 ] && echo "(KILLED: did not stop within ${RESTART_GRACE}s)" || echo "(graceful)")"
+  done
+  # shellcheck disable=SC2086
+  dc start $svc > /dev/null 2>&1
   log "restart: done, $(leaders)"
 }
 
 # ---------- scheduler ----------
 fire() {
-  local action=$1
+  local action=$1 arg=${2:-}
   case "$action" in
     writer-on) cmd_writer_on ;;
     writer-off) cmd_writer_off ;;
     job01) cmd_job01 ;;
     job10) cmd_job10 ;;
-    fault-on) cmd_fault_on ;;
+    fault-on) cmd_fault_on $arg ;;
     fault-off) cmd_fault_off ;;
-    restart) cmd_restart ;;
+    restart) cmd_restart $arg ;;
     *) log "scheduler: unknown action $action" ;;
   esac
 }
@@ -381,22 +411,24 @@ scheduler_loop() {
   while true; do
     read -r day hm < <(lab_clock)
     nowm=$(hm2min "$hm")
-    while read -r t action; do
+    while read -r t action arg; do
       case "$t" in ''|\#*) continue ;; esac
-      key="$day $t $action"
+      key="$day $t $action${arg:+ $arg}"
       grep -qxF "$key" state/fired.txt && continue
       local tm
       tm=$(hm2min "$t")
       [ "$nowm" -ge "$tm" ] || continue
       echo "$key" >> state/fired.txt
-      if [ $first = 1 ] && [ $((nowm - tm)) -gt "$GRACE_MIN" ] && [ "$action" != writer-on ]; then
-        log "scheduler: skip $t $action (already past when the scheduler started)"
+      if [ $((nowm - tm)) -gt "$GRACE_MIN" ] && [ "$action" != writer-on ]; then
+        # started late, resumed after a pause, or the line was added later: do not run it now
+        [ $first = 1 ] && log "scheduler: skip $t $action (already past when the scheduler started)" ||
+          log "scheduler: skip $t $action (more than ${GRACE_MIN} min late)"
         continue
       fi
-      log "scheduler: fire $t $action"
+      log "scheduler: fire $t $action${arg:+ $arg}"
       # own subshell + stdin from /dev/null: an action that fails cannot stop the scheduler,
       # and docker compose exec cannot read the schedule file as its stdin
-      ( fire "$action" ) < /dev/null || log "scheduler: $t $action failed (exit $?)"
+      ( fire "$action" "$arg" ) < /dev/null || log "scheduler: $t $action failed (exit $?)"
     done < "$SCHEDULE"
     first=0
     writer_tick
