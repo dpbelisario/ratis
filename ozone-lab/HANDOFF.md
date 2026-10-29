@@ -62,6 +62,23 @@ handlers waited on) was itself stuck **without a timeout**. Candidates, to check
 - **GC** is unlikely: hours of GC pauses would also stop Ratis heartbeats (leader election)
   and the `/prom` scrapes. Check it anyway (query 6).
 
+**Known Ozone bugs that match (all fixed in 2.1.0, so present in 2.0.0).** They are part of
+HDDS-11506 "Improvements for large scale deletion" (39 fixes):
+
+- **HDDS-12087**: during large-scale block deletion, the SCM map `transactionToDNsCommitMap`
+  grows until SCM has GC pauses of 327-372 s; the Ratis server then closes after a JVM pause
+  longer than its 120 s close threshold. Check the SCM log for `JvmPauseMonitor` and
+  "longer than the close-threshold", and SCM heap and GC time from 01:00 to 06:30.
+- **HDDS-11633**: a delete batch from the OM KeyDeletingService larger than 32 MB cannot be
+  written to the SCM Raft log. Log lines: "Skip writing the deleted blocks info to the delLog
+  because draft transaction fails. N keys skipped" and "Log entry size N exceeds the max
+  buffer limit of 33554432". The keys stay pending (a large "pending delete" in Recon).
+- HDDS-11508, HDDS-13213, HDDS-13517 (delete batch size not limited by Ratis request size),
+  HDDS-11712 / HDDS-11713 (SCM loops over millions of delete records), HDDS-13468 (default of
+  `ozone.scm.ha.dbtransactionbuffer.flush.interval`).
+
+Grep the production SCM and OM logs for the strings above first: it is the cheapest check.
+
 **Next lead: production, SCM leader, 05:30-06:30.**
 
 1. `rate(rpc_rpc_processing_time_num_ops{servername="ScmBlockLocationProtocolService"}[5m])`
