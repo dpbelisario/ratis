@@ -321,6 +321,27 @@ The SCM queue stays flat because every call the stalled SCM finishes (here one p
 lets the handler drop all calls of clients that gave up. Production's straight line therefore
 needs a stall where nothing finishes (section 0, point 2).
 
+### 2.5 Faithful replay with production proportions (realtime, 2026-10-30 JST)
+
+Settings: 100 call-queue slots per handler, 16 writer clients, 60,000-key delete at 01:00
+(backlog in flight), hard stall `scm-stuck` at 06:00, production restart order at 11:00-11:20.
+Export: `lab-realtime-20261030.tar.gz`.
+
+| JST | 06:00 | 06:30 | 07:00 | 07:30 | 08:00 | 08:30 | 09:00 | 09:30 | 10:00 | 10:30 | 11:00 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| OM queue (limit 500) | 0 | 35 | 75 | 115 | 155 | 195 | 235 | 275 | 315 | 357 | 399 |
+| SCM 9863 queue (limit 500) | 0 | 7 | 25 | 43 | 61 | 79 | 97 | 115 | 133 | 151 | 169 |
+
+- Both lines climb for 5 hours without reaching the limit: the OM in 15-minute steps
+  (+40 per 30 min), the SCM in a straight line (+9 per 15 min). No SCM leader election.
+  This is the production graph shape (production: OM full after ~3 h; SCM at 24 % of its limit).
+- 11:00 restart of all OMs: om1 and om2 stopped in 11 s; **om3 (the OM leader) was killed after 60 s**.
+- 11:10 restart of the SCM leader: **stopped gracefully in 4 s** with this fault (handlers stuck),
+  but it was **killed** with `scm-ratis-stuck` (state machine stuck, section 2.3). So:
+  **if the production SCM leader stopped gracefully, the stall was in the handler path (a lock
+  wait), not in the SCM state machine.** Confirm F7 with the team.
+- 11:20 release: both queues back to 0.
+
 ## 3. Two ways to use the lab
 
 **A. View the cloud run, like you view production.** A cloud machine ran the lab on the
