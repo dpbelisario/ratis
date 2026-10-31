@@ -9,7 +9,7 @@ export LAB_PROFILE=realtime
 jst() { TZ=Asia/Tokyo date "$@"; }
 day=$(jst +%Y%m%d)
 now=$((10#$(jst +%H%M)))
-healthy() { docker info >/dev/null 2>&1 && kill -0 "$(cat state/scheduler.pid 2>/dev/null)" 2>/dev/null; }
+healthy() { docker info >/dev/null 2>&1 && grep -qa scheduler-loop "/proc/$(cat state/scheduler.pid 2>/dev/null)/cmdline" 2>/dev/null; }
 export_day() {
   [ -f "exports/lab-realtime-$day.tar.gz" ] && return 0
   docker info >/dev/null 2>&1 || ./scenario.sh ensure > logs/night-ensure.log 2>&1

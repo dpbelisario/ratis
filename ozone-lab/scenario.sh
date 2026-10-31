@@ -442,8 +442,10 @@ scheduler_loop() {
   done
 }
 
+# a bare kill -0 is not enough: after a machine restart the old pid can belong to another process
+sched_alive() { local p; p=$(cat state/scheduler.pid 2>/dev/null) && [ -n "$p" ] && grep -qa scheduler-loop "/proc/$p/cmdline" 2>/dev/null; }
 cmd_start() {
-  if [ -f state/scheduler.pid ] && kill -0 "$(cat state/scheduler.pid)" 2>/dev/null; then
+  if sched_alive; then
     echo "scheduler already running (pid $(cat state/scheduler.pid))"; return 0
   fi
   echo "$LAB_PROFILE" > state/profile
@@ -452,7 +454,7 @@ cmd_start() {
   log "scheduler: daemon started (pid $!), log logs/scheduler.log, events logs/events.log"
 }
 cmd_stop() {
-  if [ -f state/scheduler.pid ]; then kill "$(cat state/scheduler.pid)" 2>/dev/null; rm -f state/scheduler.pid; fi
+  if [ -f state/scheduler.pid ]; then sched_alive && kill "$(cat state/scheduler.pid)" 2>/dev/null; rm -f state/scheduler.pid; fi
   rm -f state/writer.on
   kill_load
   log "stop: scheduler and client load stopped"
@@ -605,6 +607,7 @@ cmd_ensure() {  # cloud helper: safe to run any number of times, also after the 
     log "ensure: dockerd was down (machine restarted); recreating the containers"
     dc up -d --force-recreate
     : > state/fault   # the fault flags lived inside the old containers
+    rm -f state/scheduler.pid   # the old scheduler died with the machine
   fi
   if [ "$(prom_targets_up)" != 7 ]; then cmd_up; fi
   if [ -n "$fault_mode" ] && [ ! -s state/fault ]; then
