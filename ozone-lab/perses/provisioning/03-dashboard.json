@@ -26,7 +26,281 @@
           }
         }
       },
-      "p1": {
+      "f1": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "1, 2) rpc_call_queue_length (OM 9862 and SCM 9863 call queue (production view))",
+            "description": "1) OM queue climbing? 2) SCM 9863 queue climbing too?"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_call_queue_length{job=\"ozone-om\",port=\"9862\"}",
+                    "seriesNameFormat": "OM {{hostname}}"
+                  }
+                }
+              }
+            },
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rpc_call_queue_length{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}",
+                    "seriesNameFormat": "SCM {{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f2": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "2) rpc_rpc_processing_time_num_ops (SCM 9863 completed calls/s)",
+            "description": "Near 0 on the SCM leader while its queue climbs = scm1 is stuck (right side of the flowchart). Still finishing calls = OM side (3a, 3b)."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(rpc_rpc_processing_time_num_ops{job=\"ozone-scm\",servername=\"ScmBlockLocationProtocolService\"}[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f3": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "3a, 4) jvm_metrics_gc_time_millis (JVM GC time ms/s (OM and SCM))",
+            "description": "3a) OM lines, 4) SCM lines. Near 1000 ms/s, or gaps in the scm1 line = JVM frozen by GC. Near 0 = no."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "rate(jvm_metrics_gc_time_millis{job=~\"ozone-om|ozone-scm\"}[1m])",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f4": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "3b) Recon load on the OM (pull the Recon log)"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**Not a metric here** (Recon does not run in the lab).\n\nProduction: in the Recon log, find OM snapshot / delta pulls between 06:00 and 11:00 (`grep -iE \"snapshot|delta\" ozone-recon*.log`). Many pulls at the same time as the climb = Recon load (C4)."
+            }
+          }
+        }
+      },
+      "f5": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "5) ratis_log_worker_syncTime (SCM Ratis log sync time p99 (s))",
+            "description": "fsync of the SCM Ratis log. Seconds = slow disk or stuck Ratis."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_log_worker_syncTime{job=\"ozone-scm\",quantile=\"0.99\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f6": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "5) ratis_server_numPendingRequestInQueue (SCM Ratis pending requests)",
+            "description": "Climbing = SCM Ratis cannot keep up."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ratis_server_numPendingRequestInQueue{job=\"ozone-scm\"}",
+                    "seriesNameFormat": "{{instance}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f7": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "5b) Disk latency / iowait on scm1 (pull host metrics)"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**Not collected in the lab.**\n\nProduction: node exporter / host dashboard for scm1, or on the host: `iostat -x 5` (look at `await` and `%util` on the SCM metadata disk). High = slow disk (C1b)."
+            }
+          }
+        }
+      },
+      "f8": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "6) RocksDB write stalls on scm1 (pull the RocksDB LOG)"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**A log file, not a metric.** Live lab:\n\n`docker compose exec scm1 grep -E \"Cumulative stall|Interval stall|Stalls\\(count\\)\" /data/metadata/scm.db/LOG | tail -3`\n\n`docker compose exec scm1 grep -c -E \"Stalling writes|Stopping writes\" /data/metadata/scm.db/LOG`\n\nProduction: the same on scm1's `scm.db/LOG`. Stall above 0 percent, or any 'Stalling writes' = RocksDB stall (C1a)."
+            }
+          }
+        }
+      },
+      "f9": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "7) Large-delete bug (pull the SCM log)"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**A log, not a metric.** Live lab:\n\n`docker compose logs scm1 2>&1 | grep -E \"Skip writing the deleted blocks|exceeds the max buffer limit\"`\n\nProduction: the same grep on the scm1 log. Any line = HDDS-11633 (C2), fixed in Ozone 2.1.0."
+            }
+          }
+        }
+      },
+      "f10": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "8) jvm_metrics_threads_waiting (JVM waiting threads)",
+            "description": "A jump on the SCM leader while its queue climbs = 9863 handlers wait behind one stuck thread."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "position": "bottom",
+                "mode": "list"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "jvm_metrics_threads_waiting{job=~\"ozone-om|ozone-scm\"}",
+                    "seriesNameFormat": "{{hostname}}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "f11": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "8) Thread dumps of scm1 (run jstack)"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**A command, not a metric.** Live lab, 2-3 times a minute apart:\n\n`docker compose exec scm1 bash -c 'jstack $(jps | grep -v Jps | cut -d\" \" -f1)' > ~/scm1-$(date +%H%M%S).txt`\n\n`grep -A12 \"IPC Server handler 0 on default port 9863\" ~/scm1-*.txt`\n\nSame line in every dump = stuck lock or deadlock (C1c); that line is the cause. Production: `jstack <scm pid>` on scm1."
+            }
+          }
+        }
+      },
+      "p12": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -58,7 +332,7 @@
           ]
         }
       },
-      "p2": {
+      "p13": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -90,7 +364,7 @@
           ]
         }
       },
-      "p3": {
+      "p14": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -146,7 +420,7 @@
           ]
         }
       },
-      "p4": {
+      "p15": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -190,7 +464,7 @@
           ]
         }
       },
-      "p5": {
+      "p16": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -222,7 +496,7 @@
           ]
         }
       },
-      "p6": {
+      "p17": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -254,7 +528,7 @@
           ]
         }
       },
-      "p7": {
+      "p18": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -286,7 +560,7 @@
           ]
         }
       },
-      "p8": {
+      "p19": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -330,7 +604,7 @@
           ]
         }
       },
-      "p9": {
+      "p20": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -362,7 +636,7 @@
           ]
         }
       },
-      "p10": {
+      "p21": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -394,7 +668,7 @@
           ]
         }
       },
-      "p11": {
+      "p22": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -438,7 +712,7 @@
           ]
         }
       },
-      "p12": {
+      "p23": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -470,7 +744,7 @@
           ]
         }
       },
-      "p13": {
+      "p24": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -502,7 +776,7 @@
           ]
         }
       },
-      "p14": {
+      "p25": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -534,7 +808,7 @@
           ]
         }
       },
-      "p15": {
+      "p26": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -578,7 +852,7 @@
           ]
         }
       },
-      "p16": {
+      "p27": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -610,7 +884,7 @@
           ]
         }
       },
-      "p17": {
+      "p28": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -642,7 +916,7 @@
           ]
         }
       },
-      "p18": {
+      "p29": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -674,7 +948,7 @@
           ]
         }
       },
-      "p19": {
+      "p30": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -706,7 +980,7 @@
           ]
         }
       },
-      "p20": {
+      "p31": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -738,7 +1012,7 @@
           ]
         }
       },
-      "p21": {
+      "p32": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -782,7 +1056,7 @@
           ]
         }
       },
-      "p22": {
+      "p33": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -814,7 +1088,7 @@
           ]
         }
       },
-      "p23": {
+      "p34": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -870,7 +1144,7 @@
           ]
         }
       },
-      "p24": {
+      "p35": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -902,7 +1176,7 @@
           ]
         }
       },
-      "p25": {
+      "p36": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -958,7 +1232,7 @@
           ]
         }
       },
-      "p26": {
+      "p37": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -990,7 +1264,7 @@
           ]
         }
       },
-      "p27": {
+      "p38": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1022,7 +1296,7 @@
           ]
         }
       },
-      "p28": {
+      "p39": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1054,7 +1328,7 @@
           ]
         }
       },
-      "p29": {
+      "p40": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1086,7 +1360,7 @@
           ]
         }
       },
-      "p30": {
+      "p41": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1118,7 +1392,7 @@
           ]
         }
       },
-      "p31": {
+      "p42": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1150,7 +1424,7 @@
           ]
         }
       },
-      "p32": {
+      "p43": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1182,7 +1456,7 @@
           ]
         }
       },
-      "p33": {
+      "p44": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1226,7 +1500,7 @@
           ]
         }
       },
-      "p34": {
+      "p45": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1270,7 +1544,7 @@
           ]
         }
       },
-      "p35": {
+      "p46": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1302,7 +1576,7 @@
           ]
         }
       },
-      "p36": {
+      "p47": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1334,7 +1608,7 @@
           ]
         }
       },
-      "p37": {
+      "p48": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1366,7 +1640,7 @@
           ]
         }
       },
-      "p38": {
+      "p49": {
         "kind": "Panel",
         "spec": {
           "display": {
@@ -1426,132 +1700,119 @@
         "kind": "Grid",
         "spec": {
           "display": {
+            "title": "Flowchart checks, in order (docs/diagnose-flowchart.png)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f1"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f2"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f3"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f4"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f5"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f6"
+              }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f7"
+              }
+            },
+            {
+              "x": 8,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f8"
+              }
+            },
+            {
+              "x": 16,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f9"
+              }
+            },
+            {
+              "x": 0,
+              "y": 24,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f10"
+              }
+            },
+            {
+              "x": 8,
+              "y": 24,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/f11"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
             "title": "0. Lab markers (when did the scheduled jobs and the fault run?)",
-            "collapse": {
-              "open": true
-            }
-          },
-          "items": [
-            {
-              "x": 0,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p1"
-              }
-            },
-            {
-              "x": 8,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p2"
-              }
-            },
-            {
-              "x": 16,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p3"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "kind": "Grid",
-        "spec": {
-          "display": {
-            "title": "1. OM client RPC, port 9862 (is the OM busy or stuck?)",
-            "collapse": {
-              "open": true
-            }
-          },
-          "items": [
-            {
-              "x": 0,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p4"
-              }
-            },
-            {
-              "x": 8,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p5"
-              }
-            },
-            {
-              "x": 16,
-              "y": 0,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p6"
-              }
-            },
-            {
-              "x": 0,
-              "y": 8,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p7"
-              }
-            },
-            {
-              "x": 8,
-              "y": 8,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p8"
-              }
-            },
-            {
-              "x": 16,
-              "y": 8,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p9"
-              }
-            },
-            {
-              "x": 0,
-              "y": 16,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p10"
-              }
-            },
-            {
-              "x": 8,
-              "y": 16,
-              "width": 8,
-              "height": 8,
-              "content": {
-                "$ref": "#/spec/panels/p11"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "kind": "Grid",
-        "spec": {
-          "display": {
-            "title": "2. SCM block RPC, port 9863 (ScmBlockLocationProtocolService)",
             "collapse": {
               "open": true
             }
@@ -1583,10 +1844,23 @@
               "content": {
                 "$ref": "#/spec/panels/p14"
               }
-            },
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "1. OM client RPC, port 9862 (is the OM busy or stuck?)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
             {
               "x": 0,
-              "y": 8,
+              "y": 0,
               "width": 8,
               "height": 8,
               "content": {
@@ -1595,7 +1869,7 @@
             },
             {
               "x": 8,
-              "y": 8,
+              "y": 0,
               "width": 8,
               "height": 8,
               "content": {
@@ -1604,7 +1878,7 @@
             },
             {
               "x": 16,
-              "y": 8,
+              "y": 0,
               "width": 8,
               "height": 8,
               "content": {
@@ -1613,11 +1887,123 @@
             },
             {
               "x": 0,
-              "y": 16,
+              "y": 8,
               "width": 8,
               "height": 8,
               "content": {
                 "$ref": "#/spec/panels/p18"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p19"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p20"
+              }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p21"
+              }
+            },
+            {
+              "x": 8,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p22"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "2. SCM block RPC, port 9863 (ScmBlockLocationProtocolService)",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p23"
+              }
+            },
+            {
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p24"
+              }
+            },
+            {
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p25"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p26"
+              }
+            },
+            {
+              "x": 8,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p27"
+              }
+            },
+            {
+              "x": 16,
+              "y": 8,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p28"
+              }
+            },
+            {
+              "x": 0,
+              "y": 16,
+              "width": 8,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/p29"
               }
             }
           ]
@@ -1639,7 +2025,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p19"
+                "$ref": "#/spec/panels/p30"
               }
             },
             {
@@ -1648,7 +2034,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p20"
+                "$ref": "#/spec/panels/p31"
               }
             },
             {
@@ -1657,7 +2043,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p21"
+                "$ref": "#/spec/panels/p32"
               }
             },
             {
@@ -1666,7 +2052,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p22"
+                "$ref": "#/spec/panels/p33"
               }
             },
             {
@@ -1675,7 +2061,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p23"
+                "$ref": "#/spec/panels/p34"
               }
             },
             {
@@ -1684,7 +2070,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p24"
+                "$ref": "#/spec/panels/p35"
               }
             },
             {
@@ -1693,7 +2079,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p25"
+                "$ref": "#/spec/panels/p36"
               }
             }
           ]
@@ -1715,7 +2101,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p26"
+                "$ref": "#/spec/panels/p37"
               }
             },
             {
@@ -1724,7 +2110,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p27"
+                "$ref": "#/spec/panels/p38"
               }
             },
             {
@@ -1733,7 +2119,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p28"
+                "$ref": "#/spec/panels/p39"
               }
             },
             {
@@ -1742,7 +2128,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p29"
+                "$ref": "#/spec/panels/p40"
               }
             },
             {
@@ -1751,7 +2137,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p30"
+                "$ref": "#/spec/panels/p41"
               }
             },
             {
@@ -1760,7 +2146,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p31"
+                "$ref": "#/spec/panels/p42"
               }
             }
           ]
@@ -1782,7 +2168,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p32"
+                "$ref": "#/spec/panels/p43"
               }
             },
             {
@@ -1791,7 +2177,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p33"
+                "$ref": "#/spec/panels/p44"
               }
             },
             {
@@ -1800,7 +2186,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p34"
+                "$ref": "#/spec/panels/p45"
               }
             },
             {
@@ -1809,7 +2195,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p35"
+                "$ref": "#/spec/panels/p46"
               }
             },
             {
@@ -1818,7 +2204,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p36"
+                "$ref": "#/spec/panels/p47"
               }
             },
             {
@@ -1827,7 +2213,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p37"
+                "$ref": "#/spec/panels/p48"
               }
             },
             {
@@ -1836,7 +2222,7 @@
               "width": 8,
               "height": 8,
               "content": {
-                "$ref": "#/spec/panels/p38"
+                "$ref": "#/spec/panels/p49"
               }
             }
           ]

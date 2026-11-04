@@ -157,6 +157,55 @@ ROWS = [
     ]),
 ]
 
+# Pinned row: the diagnosis flowchart checks (docs/diagnose-flowchart.png), in order.
+# ("chart", label, title, desc, queries) or ("note", label, title, markdown) for checks that need a log or a command.
+FLOW = [
+    ("chart", "1, 2", "OM 9862 and SCM 9863 call queue (production view)",
+     "1) OM queue climbing? 2) SCM 9863 queue climbing too?",
+     [(f"rpc_call_queue_length{{{OM_RPC}}}", "OM {{hostname}}"),
+      (f"rpc_call_queue_length{{{SCM_BLK}}}", "SCM {{hostname}}")]),
+    ("chart", "2", "SCM 9863 completed calls/s",
+     "Near 0 on the SCM leader while its queue climbs = scm1 is stuck (right side of the flowchart). "
+     "Still finishing calls = OM side (3a, 3b).",
+     [(f"rate(rpc_rpc_processing_time_num_ops{{{SCM_BLK}}}[1m])", "{{hostname}}")]),
+    ("chart", "3a, 4", "JVM GC time ms/s (OM and SCM)",
+     "3a) OM lines, 4) SCM lines. Near 1000 ms/s, or gaps in the scm1 line = JVM frozen by GC. Near 0 = no.",
+     [('rate(jvm_metrics_gc_time_millis{job=~"ozone-om|ozone-scm"}[1m])', "{{hostname}}")]),
+    ("note", "3b", "Recon load on the OM (pull the Recon log)",
+     "**Not a metric here** (Recon does not run in the lab).\n\n"
+     "Production: in the Recon log, find OM snapshot / delta pulls between 06:00 and 11:00 "
+     "(`grep -iE \"snapshot|delta\" ozone-recon*.log`). Many pulls at the same time as the climb = Recon load (C4)."),
+    ("chart", "5", "SCM Ratis log sync time p99 (s)",
+     "fsync of the SCM Ratis log. Seconds = slow disk or stuck Ratis.",
+     [('ratis_log_worker_syncTime{job="ozone-scm",quantile="0.99"}', "{{instance}}")]),
+    ("chart", "5", "SCM Ratis pending requests",
+     "Climbing = SCM Ratis cannot keep up.",
+     [('ratis_server_numPendingRequestInQueue{job="ozone-scm"}', "{{instance}}")]),
+    ("note", "5b", "Disk latency / iowait on scm1 (pull host metrics)",
+     "**Not collected in the lab.**\n\n"
+     "Production: node exporter / host dashboard for scm1, or on the host: `iostat -x 5` "
+     "(look at `await` and `%util` on the SCM metadata disk). High = slow disk (C1b)."),
+    ("note", "6", "RocksDB write stalls on scm1 (pull the RocksDB LOG)",
+     "**A log file, not a metric.** Live lab:\n\n"
+     "`docker compose exec scm1 grep -E \"Cumulative stall|Interval stall|Stalls\\(count\\)\" "
+     "/data/metadata/scm.db/LOG | tail -3`\n\n"
+     "`docker compose exec scm1 grep -c -E \"Stalling writes|Stopping writes\" /data/metadata/scm.db/LOG`\n\n"
+     "Production: the same on scm1's `scm.db/LOG`. Stall above 0 percent, or any 'Stalling writes' = RocksDB stall (C1a)."),
+    ("note", "7", "Large-delete bug (pull the SCM log)",
+     "**A log, not a metric.** Live lab:\n\n"
+     "`docker compose logs scm1 2>&1 | grep -E \"Skip writing the deleted blocks|exceeds the max buffer limit\"`\n\n"
+     "Production: the same grep on the scm1 log. Any line = HDDS-11633 (C2), fixed in Ozone 2.1.0."),
+    ("chart", "8", "JVM waiting threads",
+     "A jump on the SCM leader while its queue climbs = 9863 handlers wait behind one stuck thread.",
+     [('jvm_metrics_threads_waiting{job=~"ozone-om|ozone-scm"}', "{{hostname}}")]),
+    ("note", "8", "Thread dumps of scm1 (run jstack)",
+     "**A command, not a metric.** Live lab, 2-3 times a minute apart:\n\n"
+     "`docker compose exec scm1 bash -c 'jstack $(jps | grep -v Jps | cut -d\" \" -f1)' > ~/scm1-$(date +%H%M%S).txt`\n\n"
+     "`grep -A12 \"IPC Server handler 0 on default port 9863\" ~/scm1-*.txt`\n\n"
+     "Same line in every dump = stuck lock or deadlock (C1c); that line is the cause. "
+     "Production: `jstack <scm pid>` on scm1."),
+]
+
 INTRO = """**Ozone incident lab** (Ozone 2.0.0, 3 OM + 3 SCM, lab RPC capacity 1:200).
 
 How to read: a full OM queue alone does not mean failure. Check **completed calls/s**:
@@ -179,8 +228,10 @@ def metric_names(queries):
     return names
 
 
-def panel(title, desc, queries):
+def panel(title, desc, queries, label=None):
     title = f"{', '.join(metric_names(queries))} ({title})"
+    if label:
+        title = f"{label}) {title}"
     return {
         "kind": "Panel",
         "spec": {
@@ -205,6 +256,22 @@ def build(prom_url):
                                          "items": [{"x": 0, "y": 0, "width": 24, "height": 4,
                                                     "content": {"$ref": "#/spec/panels/intro"}}]}}]
     n = 0
+    items = []
+    for i, entry in enumerate(FLOW):
+        n += 1
+        key = f"f{n}"
+        if entry[0] == "chart":
+            _, label, title, desc, queries = entry
+            panels[key] = panel(title, desc, queries, label)
+        else:
+            _, label, title, text = entry
+            panels[key] = {"kind": "Panel", "spec": {"display": {"name": f"{label}) {title}"},
+                                                     "plugin": {"kind": "Markdown", "spec": {"text": text}}}}
+        items.append({"x": (i % 3) * 8, "y": (i // 3) * 8, "width": 8, "height": 8,
+                      "content": {"$ref": f"#/spec/panels/{key}"}})
+    layouts.append({"kind": "Grid", "spec": {"display": {"title": "Flowchart checks, in order (docs/diagnose-flowchart.png)",
+                                                         "collapse": {"open": True}},
+                                             "items": items}})
     for row_title, row_panels in ROWS:
         items = []
         for i, (title, desc, queries) in enumerate(row_panels):
@@ -227,7 +294,8 @@ def build(prom_url):
 
 def all_queries():
     """Every PromQL query in the dashboard (used by scenario.sh check-panels)."""
-    return [(title, q) for _, row in ROWS for title, _, qs in row for q, _ in qs]
+    flow = [(f"{e[1]}) {e[2]}", q) for e in FLOW if e[0] == "chart" for q, _ in e[4]]
+    return flow + [(title, q) for _, row in ROWS for title, _, qs in row for q, _ in qs]
 
 
 def main():
