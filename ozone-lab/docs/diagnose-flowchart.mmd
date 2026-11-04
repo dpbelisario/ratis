@@ -1,0 +1,31 @@
+flowchart TD
+    A{"1. OM queue on 9862<br/>climbing?<br/><small>rpc_call_queue_length port 9862</small>"}
+    A -- No --> Z0["Not this incident"]
+    A -- Yes --> B{"2. SCM queue on 9863 climbing<br/>AND SCM 9863 finishes 0 calls/s?<br/><small>rpc_call_queue_length + rate of rpc_rpc_processing_time_num_ops<br/>ScmBlockLocationProtocolService</small>"}
+
+    B -- "No, SCM still finishes calls" --> O1{"3a. OM GC time high?<br/><small>jvm_metrics_gc_time_millis, job ozone-om</small>"}
+    O1 -- Yes --> R_C11["OM garbage collection<br/>(C11)"]
+    O1 -- No --> O2{"3b. Many OM calls from Recon<br/>at the same time?<br/><small>Recon log: snapshot or delta pull</small>"}
+    O2 -- Yes --> R_C4["Recon overloads OM<br/>(C4)"]
+    O2 -- No --> R_C5["OM-side problem<br/>(C5): take OM jstack"]
+
+    B -- "Yes, SCM1 is stuck" --> S1{"4. Whole SCM JVM frozen?<br/>GC time near 1000 ms/s,<br/>or gaps in all scm1 metrics<br/><small>jvm_metrics_gc_time_millis, job ozone-scm</small>"}
+    S1 -- Yes --> R_C3["SCM garbage collection<br/>(C3, HDDS-12087)"]
+    S1 -- No --> S2{"5. Ratis log sync slow<br/>or pending requests climbing?<br/><small>ratis_log_worker_syncTime p99<br/>ratis_server_numPendingRequestInQueue</small>"}
+    S2 -- Yes --> S2b{"Disk latency or iowait<br/>high on scm1?"}
+    S2b -- Yes --> R_C1b["Slow or stuck disk on scm1<br/>(C1b)"]
+    S2b -- No --> R_RAT["Ratis stall<br/>(C1): take SCM jstack"]
+    S2 -- No --> S3{"6. RocksDB LOG on scm1 says<br/>'Stalling writes' or 'Stopping writes'?"}
+    S3 -- Yes --> R_C1a["RocksDB write stall on scm1<br/>(C1a)"]
+    S3 -- No --> S4{"7. SCM log says<br/>'Skip writing the deleted blocks'<br/>or 'exceeds the max buffer limit'?"}
+    S4 -- Yes --> R_C2["Large-delete bug<br/>(C2, HDDS-11633): upgrade to 2.1.0"]
+    S4 -- No --> S5{"8. Waiting threads jump on scm1,<br/>and 2-3 jstacks a minute apart<br/>show 9863 workers on the same line?<br/><small>jvm_metrics_threads_waiting</small>"}
+    S5 -- Yes --> R_C1c["Stuck lock or deadlock in SCM<br/>(C1c): the jstack line is the cause"]
+    S5 -- No --> R_UNK["Unknown: keep the jstacks<br/>and SCM logs for the team"]
+
+    classDef q fill:#eef3fb,stroke:#3b6fc4,color:#000
+    classDef r fill:#fdecea,stroke:#c0392b,color:#000
+    classDef ok fill:#e8f6ec,stroke:#27ae60,color:#000
+    class A,B,O1,O2,S1,S2,S2b,S3,S4,S5 q
+    class R_C11,R_C4,R_C5,R_C3,R_C1b,R_RAT,R_C1a,R_C2,R_C1c,R_UNK r
+    class Z0 ok

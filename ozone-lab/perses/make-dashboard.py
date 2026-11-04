@@ -9,6 +9,7 @@ Usage: python3 perses/make-dashboard.py [--prom-url http://prometheus:9090]
 import argparse
 import json
 import os
+import re
 
 PROJECT = "ozone"
 DASHBOARD = "ozone-rpc"
@@ -31,6 +32,10 @@ ROWS = [
           ("lab_writer_clients", "writer clients")]),
     ]),
     ("1. OM client RPC, port 9862 (is the OM busy or stuck?)", [
+        ("OM 9862 and SCM 9863 call queue (production view)",
+         "Both queues on one chart, like the production graph: OM climbs in 15-minute steps, SCM in a straight line.",
+         [(f"rpc_call_queue_length{{{OM_RPC}}}", "OM {{hostname}}"),
+          (f"rpc_call_queue_length{{{SCM_BLK}}}", "SCM {{hostname}}")]),
         ("OM call queue length",
          "Calls waiting for a handler. Lab limit = 5 handlers x 10 = 50 (production 100 x 100 = 10K).",
          [(f"rpc_call_queue_length{{{OM_RPC}}}", "{{hostname}}")]),
@@ -145,6 +150,10 @@ ROWS = [
          [('jvm_metrics_mem_heap_used_m{job=~"ozone-om|ozone-scm"}', "{{hostname}}")]),
         ("JVM blocked threads", "Many blocked threads = lock contention.",
          [('jvm_metrics_threads_blocked{job=~"ozone-om|ozone-scm"}', "{{hostname}}")]),
+        ("JVM waiting threads",
+         "Threads parked on a lock or a future (ReentrantLock waits show here, not as blocked). "
+         "A jump on the SCM leader = handlers wait behind one stuck thread.",
+         [('jvm_metrics_threads_waiting{job=~"ozone-om|ozone-scm"}', "{{hostname}}")]),
     ]),
 ]
 
@@ -156,7 +165,22 @@ Row 3 follows a delete from OM to SCM. Row 4 shows if the SCM state machine keep
 """
 
 
+PROMQL_WORDS = {"rate", "sum", "by", "max", "scalar", "deriv", "irate", "increase", "avg", "min"}
+
+
+def metric_names(queries):
+    """Raw metric names used by the queries, in first-seen order (functions and labels left out)."""
+    names = []
+    for q, _ in queries:
+        q = re.sub(r"\{[^}]*\}|\[[^\]]*\]|\bby\s*\([^)]*\)", " ", q)
+        for w in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", q):
+            if "_" in w and w not in PROMQL_WORDS and w not in names:
+                names.append(w)
+    return names
+
+
 def panel(title, desc, queries):
+    title = f"{', '.join(metric_names(queries))} ({title})"
     return {
         "kind": "Panel",
         "spec": {
