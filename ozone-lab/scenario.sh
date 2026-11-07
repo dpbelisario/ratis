@@ -443,10 +443,17 @@ scheduler_loop() {
 }
 
 # a bare kill -0 is not enough: after a machine restart the old pid can belong to another process
-sched_alive() { local p; p=$(cat state/scheduler.pid 2>/dev/null) && [ -n "$p" ] && grep -qa scheduler-loop "/proc/$p/cmdline" 2>/dev/null; }
+sched_running() { local p; p=$(cat state/scheduler.pid 2>/dev/null) && [ -n "$p" ] && grep -qa scheduler-loop "/proc/$p/cmdline" 2>/dev/null; }
+# each loop pass rewrites state/metrics/metrics; no rewrite for 5 minutes = the loop hangs (seen after a VM pause)
+sched_heartbeat_age() { echo $(( $(date +%s) - $(stat -c %Y state/metrics/metrics 2>/dev/null || echo 0) )); }
+sched_alive() { sched_running && [ "$(sched_heartbeat_age)" -lt 300 ]; }
 cmd_start() {
   if sched_alive; then
     echo "scheduler already running (pid $(cat state/scheduler.pid))"; return 0
+  fi
+  if sched_running; then
+    log "scheduler: pid $(cat state/scheduler.pid) alive but no loop pass for $(sched_heartbeat_age) s; restarting it"
+    kill "$(cat state/scheduler.pid)" 2>/dev/null
   fi
   echo "$LAB_PROFILE" > state/profile
   nohup setsid "$0" scheduler-loop >> logs/scheduler.log 2>&1 < /dev/null &

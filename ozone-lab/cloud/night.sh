@@ -9,7 +9,9 @@ export LAB_PROFILE=realtime
 jst() { TZ=Asia/Tokyo date "$@"; }
 day=$(jst +%Y%m%d)
 now=$((10#$(jst +%H%M)))
-healthy() { docker info >/dev/null 2>&1 && grep -qa scheduler-loop "/proc/$(cat state/scheduler.pid 2>/dev/null)/cmdline" 2>/dev/null; }
+# the scheduler process must exist AND its loop must still run (it rewrites state/metrics/metrics every pass)
+healthy() { docker info >/dev/null 2>&1 && grep -qa scheduler-loop "/proc/$(cat state/scheduler.pid 2>/dev/null)/cmdline" 2>/dev/null &&
+  [ $(( $(date +%s) - $(stat -c %Y state/metrics/metrics 2>/dev/null || echo 0) )) -lt 300 ]; }
 export_day() {
   [ -f "exports/lab-realtime-$day.tar.gz" ] && return 0
   docker info >/dev/null 2>&1 || ./scenario.sh ensure > logs/night-ensure.log 2>&1
